@@ -108,7 +108,7 @@ async function route(req, res, out) {
       setSess(res, { ...S, player: rs.insertId }); return out({ id: rs.insertId }, 201)
     }
     case 'login': { // admin login
-      const a = await one('SELECT * FROM admins WHERE username=?', [b.username || ''])
+      const a = await one('SELECT * FROM admins WHERE LOWER(username)=?', [(b.username || '').trim().toLowerCase()])
       if (!a || !(await bcrypt.compare(b.password || '', a.password))) return out({ error: 'Wrong username or password.' }, 401)
       setSess(res, { ...S, admin: a.id }); return out({ ok: true })
     }
