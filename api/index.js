@@ -19,6 +19,8 @@ const q = async (sql, p = []) => {
 }
 const one = async (sql, p) => (await q(sql, p))[0] || null
 const nul = x => (x === '' || x === undefined ? null : x)
+const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const mdob = s => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1] || ''}` : null)
 
 // ---- Cloudinary (the browser uploads files itself; the server only signs and deletes) ----
 const sign = p => crypto.createHash('sha1').update(Object.keys(p).sort().map(k => `${k}=${p[k]}`).join('&') + E.CLOUDINARY_API_SECRET).digest('hex')
@@ -85,11 +87,13 @@ async function route(req, res, out) {
         const g = await q('SELECT g.match_id,p.id pid,p.name,SUM(g.qty) qty FROM goals g JOIN players p ON p.id=g.player_id WHERE g.match_id IS NOT NULL GROUP BY g.match_id,p.id ORDER BY qty DESC')
         rows.forEach(x => { x.scorers = g.filter(y => y.match_id == x.id) })
       }
+      if (t === 'players') rows.forEach(x => { x.dob = mdob(x.dob) })
       return out(rows)
     }
     case 'player': {
       const p = await one(`SELECT ${PL},created_at FROM players WHERE id=?`, [req.query.id || 0])
       if (!p) return out({ error: 'Player not found' }, 404)
+      p.dob = mdob(p.dob)
       p.goals = +(await one('SELECT COALESCE(SUM(qty),0) n FROM goals WHERE player_id=?', [p.id])).n
       p.awards = (await q('SELECT month FROM potm WHERE player_id=? ORDER BY month DESC', [p.id])).map(x => x.month)
       return out(p)

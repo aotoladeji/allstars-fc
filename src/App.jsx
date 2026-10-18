@@ -134,7 +134,7 @@ function Player() {
   const { id } = useParams(); const p = useApi('player', { id })
   if (!p) return <Empty>Loading player…</Empty>
   const parts = p.name.trim().split(/\s+/); const last = parts.length > 1 ? parts.pop() : ''
-  const rows = [['Nationality', p.nationality], ['D.O.B', p.dob && fmt(p.dob)], ['Position', p.position], ['Alternate position', p.alt_position],
+  const rows = [['Nationality', p.nationality], ['D.O.B', p.dob], ['Position', p.position], ['Alternate position', p.alt_position],
     ['Height', p.height], ['Weight', p.weight], ['Preferred foot', p.foot], ['Shirt number', p.shirt_no],
     ['State of origin', p.state_origin], ['State of residence', p.state_residence]].filter(r => r[1])
   const career = p.career?.split('\n').filter(Boolean) || []
