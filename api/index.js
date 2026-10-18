@@ -9,12 +9,17 @@ const E = process.env
 // ---- Database (Aiven needs SSL, which is what the CA certificate is for) ----
 let pool
 const db = () => (pool ??= mysql.createPool({ host: E.DB_HOST, port: +E.DB_PORT, user: E.DB_USER, password: E.DB_PASS, database: E.DB_NAME,
-  ssl: { ca: CA }, connectionLimit: 1, dateStrings: true, connectTimeout: 15000 }))
-const q = async (sql, p = []) => {
-  try { return (await db().query(sql, p))[0] }
-  catch (e) {
-    if (!['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(e.code)) throw e
-    pool = undefined; return (await db().query(sql, p))[0]
+  ssl: { ca: CA }, connectionLimit: 1, dateStrings: true, connectTimeout: 8000, enableKeepAlive: true }))
+const RETRY = ['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'PROTOCOL_SEQUENCE_TIMEOUT']
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const reset = () => { const old = pool; pool = undefined; try { old?.end().catch(() => {}) } catch {} }
+const q = async (sql, p = []) => { // a dropped/stalled connection is retried on a fresh one
+  for (let attempt = 0; ; attempt++) {
+    try { return (await db().query(sql, p))[0] }
+    catch (e) {
+      if (attempt >= 2 || !RETRY.includes(e.code)) throw e
+      reset(); await sleep(250 * (attempt + 1))
+    }
   }
 }
 const one = async (sql, p) => (await q(sql, p))[0] || null
@@ -64,9 +69,25 @@ const CFG = {
 }
 const FILECOLS = { hero_images: 'image', gallery: 'file', players: 'photo,photo2,photo3', matches: 'opponent_logo' }
 
+// Input/data mistakes get a clear message instead of a scary server error; real faults still log
+const INPUT = {
+  ER_DATA_TOO_LONG: 'One of the values is too long.',
+  ER_BAD_NULL_ERROR: 'Please fill in all required fields.',
+  ER_NO_DEFAULT_FOR_FIELD: 'Please fill in all required fields.',
+  ER_NO_REFERENCED_ROW_2: 'The linked player or match no longer exists.',
+  ER_ROW_IS_REFERENCED_2: 'That item is still in use and cannot be deleted.',
+  ER_DUP_ENTRY: 'That entry already exists.',
+  ER_WARN_DATA_OUT_OF_RANGE: 'One of the numbers is too large.',
+  ER_TRUNCATED_WRONG_VALUE: 'One of the values has the wrong format.',
+}
 export default async function handler(req, res) {
   const out = (d, c = 200) => res.status(c).json(d)
-  try { return await route(req, res, out) } catch (e) { console.error(e); return out({ error: 'Server error. Please try again.' }, 500) }
+  try { return await route(req, res, out) }
+  catch (e) {
+    console.error(`${req.method} ${req.url} ::`, e.code || '', e.sqlMessage || e.message)
+    if (INPUT[e.code]) return out({ error: INPUT[e.code] }, 400)
+    return out({ error: 'Server error. Please try again.' }, 500)
+  }
 }
 
 async function route(req, res, out) {
