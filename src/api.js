@@ -11,6 +11,7 @@ export const img = p => {
 }
 
 export async function api(r, { method = 'GET', body, params = {} } = {}) {
+  if (body instanceof FormData) throw new Error('Pass formData(form) instead of a raw FormData as the body.')
   const opt = { method, credentials: 'include' }
   if (body) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body) }
   const res = await fetch(BASE + '?' + new URLSearchParams({ r, ...params }), opt)

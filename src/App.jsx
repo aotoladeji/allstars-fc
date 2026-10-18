@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, NavLink, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { api, img, useApi } from './api'
+import { api, formData, img, useApi } from './api'
 import { INTRO, GLANCE, JOIN, FINES, RULES } from './clubInfo'
 
 const LOGO = import.meta.env.BASE_URL + 'logo.png'
@@ -180,7 +180,7 @@ function Register({ refresh }) {
   const nav = useNavigate(); const [err, setErr] = useState('')
   const submit = async e => {
     e.preventDefault(); setErr('')
-      try { await api('register', { method: 'POST', body: new FormData(e.target) }); await refresh(); nav('/account') } catch (x) { setErr(x.message) }
+      try { await api('register', { method: 'POST', body: await formData(e.target, true) }); await refresh(); nav('/account') } catch (x) { setErr(x.message) }
   }
   return <div className="wrap narrow"><h1>Join the squad</h1>
       <p>Your profile goes live straight away. Full membership needs the ₦10,000 joining fee and the executives’ approval. After that, the admin certifies you.</p>
@@ -225,7 +225,7 @@ function Account({ me, refresh }) {
     e.preventDefault(); setMsg(''); setErr('')
     const f = e.target
     try {
-      await api('player_update', { method: 'POST', body: new FormData(f) })
+      await api('player_update', { method: 'POST', body: await formData(f) })
       await refresh(); setPrev(''); ['photo', 'photo2', 'photo3', 'current_password', 'new_password'].forEach(k => f[k].value = '')
       setMsg('Saved. Your changes are now live on your public profile and the Members page.')
     } catch (x) { setErr(x.message) }
@@ -312,7 +312,11 @@ function Section({ t }) {
     await api('admin', { method: 'POST', params: { t }, body: { id: r.id, home_score: a, away_score: b } }); setN(n + 1)
   }
   const add = async e => { e.preventDefault(); setErr('')
-    try { await api('admin', { method: 'POST', params: { t }, body: new FormData(e.target) }); e.target.reset(); setN(n + 1) } catch (x) { setErr(x.message) } }
+    try {
+      const b = await formData(e.target)
+      await api('admin', { method: 'POST', params: { t }, body: b })
+      e.target.reset(); setN(n + 1)
+    } catch (x) { setErr(x.message) } }
   const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); setN(n + 1) } }
   const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); setN(n + 1) }
   const multi = t === 'hero_images'
