@@ -96,7 +96,7 @@ function Home() {
     <div className="wrap tight"><Glance /><p><Link to="/club">Club rules and how to join</Link></p></div>
     <Highlight h={d.highlight} />
     <div className="wrap grid2">
-      <section><h2>This week at the club</h2>
+      <section><h2>Announcements</h2>
           {d.news.length ? d.news.map(n => <NewsBanner key={n.id} n={n} />) : <Empty>No news yet. Check back after the weekend.</Empty>}
         <Link to="/news">All news</Link></section>
       <aside>
