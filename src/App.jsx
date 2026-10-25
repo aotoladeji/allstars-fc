@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useParams, useNavigate, useLocation } fro
 import { api, formData, img, useApi } from './api'
 import { INTRO, GLANCE, JOIN, FINES, RULES } from './clubInfo'
 
-const LOGO = import.meta.env.BASE_URL + 'logo.png'
+const LOGO = import.meta.env.BASE_URL + 'llg.png'
 const fmt = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const Empty = ({ children }) => <p className="empty">{children}</p>
 const Face = ({ p, cls = '' }) => p.photo ? <img className={cls} src={img(p.photo)} alt={p.name} /> : <div className={'ph ' + cls}>{p.name?.[0]}</div>
@@ -18,7 +18,7 @@ export default function App() {
   const links = [['/', 'Home'], ['/news', 'News'], ['/matches', 'Matches'], ['/members', 'Members'], ['/gallery', 'Gallery'], ['/club', 'The Club'],
     me ? ['/account', 'My profile'] : ['/login', 'Player login'], ...(me ? [] : [['/register', 'Join the team']])]
   return (<>
-    <header className="top"><Link to="/" className="logo"><img src={import.meta.env.BASE_URL + "logo.png"} alt="" />All Stars FC</Link>
+    <header className="top"><Link to="/" className="logo"><img src={import.meta.env.BASE_URL + "llg.png"} alt="" />All Stars FC</Link>
       <button className="burger" aria-label="Menu" aria-expanded={open} onClick={() => setOpen(!open)}><span /><span /><span /></button>
       <nav className={open ? 'open' : ''}>{links.map(([to, l]) => <NavLink key={to} to={to} end={to === '/'}>{l}</NavLink>)}</nav></header>
     <main><Routes>
@@ -264,7 +264,7 @@ function Club() {
   const [tab, setTab] = useState('about'); const [rule, setRule] = useState(0)
   return <>
     <section className="club-hero">
-      <img src={import.meta.env.BASE_URL + 'logo.png'} alt="" />
+      <img src={import.meta.env.BASE_URL + 'llg.png'} alt="" />
       <div><h1>All Stars FC</h1><p>{INTRO[0]}</p></div>
     </section>
     <div className="subtabs" role="tablist">
