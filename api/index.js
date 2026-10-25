@@ -196,9 +196,23 @@ async function route(req, res, out) {
         if (FILECOLS[t]) Object.values((await one(`SELECT ${FILECOLS[t]} FROM ${t} WHERE id=?`, [id])) || {}).forEach(cldDelete)
         await q(`DELETE FROM ${t} WHERE id=?`, [id]); return out({ ok: true })
       }
+      if (m === 'PUT' || b.id && (b.update || m === 'PATCH')) {
+        if (t === 'execos') {
+          const id = +b.id || 0
+          const set = [], v = []
+          for (const col of c.cols) if (b[col] !== undefined) { set.push(`${col}=?`); v.push(nul(b[col])) }
+          if (b.file) {
+            if (!okUrl(b.file)) return out({ error: 'Bad photo link.' }, 400)
+            await cldDelete((await one('SELECT photo v FROM execos WHERE id=?', [id]))?.v)
+            set.push('photo=?'); v.push(b.file)
+          }
+          if (!set.length) return out({ ok: true })
+          await q(`UPDATE execos SET ${set.join(',')} WHERE id=?`, [...v, id]); return out({ ok: true })
+        }
+      }
       if (m !== 'POST' || !(c.cols.length || t === 'players')) return out({ error: 'Not allowed' }, 405)
       if (t === 'players') { await q(`UPDATE players SET certified_on=${b.certify ? 'CURDATE()' : 'NULL'} WHERE id=?`, [+b.id || 0]); return out({ ok: true }) }
-      if (t === 'matches' && b.id) { await q('UPDATE matches SET home_score=?,away_score=?,played=1 WHERE id=?', [+b.home_score || 0, +b.away_score || 0, +b.id]); return out({ ok: true }) }
+      if (t === 'matches' && b.id && !b.update) { await q('UPDATE matches SET home_score=?,away_score=?,played=1 WHERE id=?', [+b.home_score || 0, +b.away_score || 0, +b.id]); return out({ ok: true }) }
       if (t === 'hero_images') {
         const urls = [].concat(b.file || []).filter(okUrl)
         if (!urls.length) return out({ error: 'Choose at least one image.' }, 400)

@@ -372,6 +372,31 @@ function Section({ t }) {
       await api('admin', { method: 'POST', params: { t }, body: b })
       e.target.reset(); setN(n + 1)
     } catch (x) { setErr(x.message) } }
+  const editExco = async r => {
+    if (t !== 'execos') return
+    const name = prompt('Name', r.name || '') ?? r.name
+    const position = prompt('Position', r.position || '') ?? r.position
+    const bio = prompt('Bio', r.bio || '') ?? r.bio
+    const sort_order = prompt('Order', r.sort_order ?? 0) ?? r.sort_order
+    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }); setN(n+1) } catch(x){ alert(x.message) }
+  }
+  const editExcoPhoto = async r => {
+    if (t !== 'execos') return
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'
+    input.onchange = async () => {
+      const file = input.files?.[0]; if (!file) return
+      try {
+        const s = await api('sign')
+        const fd = new FormData()
+        fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
+        const j = await up.json()
+        if (j.secure_url) { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } }); setN(n+1) }
+      } catch(x){ alert('Failed') }
+    }
+    input.click()
+  }
   const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); setN(n + 1) } }
   const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); setN(n + 1) }
   const multi = t === 'hero_images'
@@ -380,17 +405,19 @@ function Section({ t }) {
     : ty === 'match' ? <select name={k}><option value="">No specific match</option>{ms?.map(x => <option key={x.id} value={x.id}>{x.opponent} · {fmt(x.match_date)}</option>)}</select>
     : ty === 'category' ? <select name={k}>{(t === 'highlights' ? ['week','month'] : CATS).map(c => <option key={c}>{c}</option>)}</select>
     : ty === 'check' ? <input name={k} type="checkbox" value="1" defaultChecked={k === 'active'} />
-    : ty === 'file' ? <input name={multi ? 'file[]' : 'file'} type="file" multiple={multi} required={t !== 'matches'} accept={t === 'gallery' ? 'image/*,video/mp4,video/webm' : 'image/*'} />
-    : <input name={k} type={ty || 'text'} required={['title', 'opponent', 'match_date', 'month','image'].includes(k) && t !== 'highlights' ? false : (['title','opponent','match_date','month'].includes(k))} />}</label>
+    : ty === 'file' ? <input name={multi ? 'file[]' : 'file'} type="file" multiple={multi} required={t !== 'matches' && t !== 'potm'} accept={t === 'gallery' ? 'image/*,video/mp4,video/webm' : 'image/*'} />
+    : <input name={k} type={ty || 'text'} required={['title', 'opponent', 'match_date', 'month'].includes(k) && t !== 'highlights' && t !== 'potm' ? true : (['name','position'].includes(k))} />}</label>
   return (<div><h2>{label}</h2>
     {fields.length > 0 && <form className="form" onSubmit={add}>{fields.map(input)}{err && <p className="err">{err}</p>}<button className="btn">{multi ? 'Upload' : 'Add'}</button></form>}
         <ul className="rows">{rows?.map(r => <li key={r.id}>
-      <span>{r.image && <img className="thumb" src={img(r.image)} alt="" />}{[r.title, r.opponent, r.name, r.month, r.caption, r.qty && `x${r.qty}`].filter(Boolean).join(' · ') || `#${r.id}`}
+      <span>{(r.image||r.photo) && <img className="thumb" src={img(r.image||r.photo)} alt="" />}{[r.title, r.opponent, r.name, r.position, r.month, r.caption, r.qty && `x${r.qty}`].filter(Boolean).join(' · ') || `#${r.id}`}
         {r.certified_on && <em className="since"> ✓ certified {fmt(r.certified_on)}</em>}</span>
         {r.introduced_by && <em className="since"> · introduced by {r.introduced_by}</em>}
         <span className="btns">
         {t === 'matches' && <button className="ok-btn" onClick={() => result(r)}>{+r.played ? 'Edit result' : 'Set result'}</button>}
         {t === 'players' && <button className={'cert' + (r.certified_on ? ' on' : '')} onClick={() => certify(r)}>{r.certified_on ? 'Revoke' : 'Certify'}</button>}
+        {t === 'execos' && <button onClick={() => editExco(r)}>Edit</button>}
+        {t === 'execos' && <button onClick={() => editExcoPhoto(r)}>Change photo</button>}
         <button onClick={() => del(r.id)}>Delete</button></span>
         </li>)}
         </ul>
