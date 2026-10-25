@@ -53,6 +53,39 @@ function Hero({ slides, mode, next }) {
   </section>)
 }
 
+function Highlight({ h }) {
+  const [open, setOpen] = useState(false)
+  if (!h) return null
+  return <>
+    <section className="highlight">
+      <div className="wrap wide highlight-card">
+        <div className="highlight-grid">
+          <div className="highlight-img"><img src={img(h.image)} alt={h.title || ''} /></div>
+          <div className="highlight-text">
+            <small className="highlight-kicker">{h.category === 'month' ? 'Highlight of the Month' : 'Highlight of the Week'}</small>
+            {h.title && <h2>{h.title}</h2>}
+            {h.subtitle && <h3>{h.subtitle}</h3>}
+            {h.body && <p className="hl-body">{h.body.length > 180 ? h.body.slice(0, 177) + '...' : h.body}</p>}
+            {(h.body && h.body.length > 0) || h.subtitle ? <button className="hl-read" onClick={() => setOpen(true)}>Read more</button> : null}
+          </div>
+        </div>
+      </div>
+    </section>
+    {open && <div className="hl-modal" onClick={() => setOpen(false)}>
+      <div className="hl-modal-inner" onClick={e => e.stopPropagation()}>
+        <button className="hl-close" onClick={() => setOpen(false)}>×</button>
+        <img className="hl-modal-img" src={img(h.image)} alt={h.title || ''} />
+        <div className="hl-modal-content">
+          <small className="highlight-kicker">{h.category === 'month' ? 'Highlight of the Month' : 'Highlight of the Week'}</small>
+          {h.title && <h2>{h.title}</h2>}
+          {h.subtitle && <h3>{h.subtitle}</h3>}
+          {h.body && <p>{h.body}</p>}
+        </div>
+      </div>
+    </div>}
+  </>
+}
+
 function Home() {
   const d = useApi('home')
   if (d === null) return <p className="empty">Loading…</p>
@@ -61,14 +94,25 @@ function Home() {
   return (<>
     <Hero slides={d.hero} mode={d.hero_mode} next={d.next} />
     <div className="wrap tight"><Glance /><p><Link to="/club">Club rules and how to join</Link></p></div>
+    <Highlight h={d.highlight} />
     <div className="wrap grid2">
       <section><h2>This week at the club</h2>
           {d.news.length ? d.news.map(n => <NewsBanner key={n.id} n={n} />) : <Empty>No news yet. Check back after the weekend.</Empty>}
         <Link to="/news">All news</Link></section>
       <aside>
         <h2>Player of the month</h2>
-        {d.potm ? <Link to={`/player/${d.potm.player_id}`} className="potm">
-          <Face p={d.potm} /><div><small>{d.potm.month}</small><h3>{d.potm.name}</h3><p>{d.potm.note}</p></div></Link> : <Empty>Not chosen yet.</Empty>}
+        {d.potm ? <Link to={`/player/${d.potm.player_id}`} className="potm-card">
+          <div className="potm-bg" style={d.potm.photo ? { backgroundImage: `url(${img(d.potm.photo)})` } : {}}>
+            <div className="potm-overlay">
+              <div className="potm-meta">
+                <small>PLAYER OF THE MONTH</small>
+                <h3>{d.potm.name}</h3>
+                <span>{d.potm.month}</span>
+              </div>
+            </div>
+          </div>
+          {d.potm.note && <div className="potm-note"><p>{d.potm.note}</p></div>}
+        </Link> : <Empty>Not chosen yet.</Empty>}
       </aside>
     </div>
     <section className="band"><div className="wrap"><h2>Goal chart</h2>
@@ -294,6 +338,7 @@ function Club() {
 
 const SECTIONS = {
   hero_images: ['Hero images', [['caption', 'Headline on image'], ['sort_order', 'Order', 'number'], ['file', 'Image', 'file']]],
+  highlights: ['Highlight of the week/month', [['title', 'Title'], ['subtitle', 'Subtitle'], ['body', 'Text'], ['category', 'Category (week/month)'], ['active', 'Active', 'check'], ['sort_order', 'Order', 'number'], ['file', 'Image', 'file']]],
   news: ['News', [['title', 'Title'], ['body', 'Story', 'textarea']]],
   potm: ['Player of month', [['month', 'Month', 'month'], ['player_id', 'Player', 'player'], ['note', 'Why they won']]],
   matches: ['Matches', [['opponent', 'Opponent'], ['file', 'Opponent logo (optional)', 'file'], ['match_date', 'Date', 'date'], ['venue', 'Venue'], ['home_score', 'All Stars goals', 'number'], ['away_score', 'Opponent goals', 'number'], ['played', 'Played', 'check']]],
@@ -323,10 +368,10 @@ function Section({ t }) {
      const input = ([k, l, ty]) => <label key={k}>{l}{ty === 'textarea' ? <textarea name={k} rows="4" />
     : ty === 'player' ? <select name={k} required>{players?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
     : ty === 'match' ? <select name={k}><option value="">No specific match</option>{ms?.map(x => <option key={x.id} value={x.id}>{x.opponent} · {fmt(x.match_date)}</option>)}</select>
-    : ty === 'category' ? <select name={k}>{CATS.map(c => <option key={c}>{c}</option>)}</select>
-    : ty === 'check' ? <input name={k} type="checkbox" value="1" />
+    : ty === 'category' ? <select name={k}>{(t === 'highlights' ? ['week','month'] : CATS).map(c => <option key={c}>{c}</option>)}</select>
+    : ty === 'check' ? <input name={k} type="checkbox" value="1" defaultChecked={k === 'active'} />
     : ty === 'file' ? <input name={multi ? 'file[]' : 'file'} type="file" multiple={multi} required={t !== 'matches'} accept={t === 'gallery' ? 'image/*,video/mp4,video/webm' : 'image/*'} />
-    : <input name={k} type={ty || 'text'} required={['title', 'opponent', 'match_date', 'month'].includes(k)} />}</label>
+    : <input name={k} type={ty || 'text'} required={['title', 'opponent', 'match_date', 'month','image'].includes(k) && t !== 'highlights' ? false : (['title','opponent','match_date','month'].includes(k))} />}</label>
   return (<div><h2>{label}</h2>
     {fields.length > 0 && <form className="form" onSubmit={add}>{fields.map(input)}{err && <p className="err">{err}</p>}<button className="btn">{multi ? 'Upload' : 'Add'}</button></form>}
         <ul className="rows">{rows?.map(r => <li key={r.id}>

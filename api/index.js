@@ -9,7 +9,7 @@ const E = process.env
 // ---- Database (Aiven needs SSL, which is what the CA certificate is for) ----
 let pool
 const db = () => (pool ??= mysql.createPool({ host: E.DB_HOST, port: +E.DB_PORT, user: E.DB_USER, password: E.DB_PASS, database: E.DB_NAME,
-  ssl: { ca: CA }, connectionLimit: 1, dateStrings: true, connectTimeout: 8000, enableKeepAlive: true }))
+  ssl: { ca: CA, rejectUnauthorized: false }, connectionLimit: 1, dateStrings: true, connectTimeout: 8000, enableKeepAlive: true }))
 const RETRY = ['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'PROTOCOL_SEQUENCE_TIMEOUT']
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const reset = () => { const old = pool; pool = undefined; try { old?.end().catch(() => {}) } catch {} }
@@ -55,6 +55,7 @@ const LISTS = {
   players: `SELECT ${PL} FROM players ORDER BY shirt_no,name`,
   goals: 'SELECT g.id,g.qty,p.name,m.opponent FROM goals g JOIN players p ON p.id=g.player_id LEFT JOIN matches m ON m.id=g.match_id ORDER BY g.id DESC',
   potm: 'SELECT o.id,o.player_id,o.month,o.note,p.name,p.photo,p.position FROM potm o JOIN players p ON p.id=o.player_id ORDER BY o.month DESC',
+  highlights: 'SELECT * FROM highlights ORDER BY sort_order,id DESC',
 }
 const SCORERS = 'SELECT p.id,p.name,p.photo,SUM(g.qty) goals FROM goals g JOIN players p ON p.id=g.player_id GROUP BY p.id ORDER BY goals DESC LIMIT 10'
 const PCOLS = ['name', 'position', 'shirt_no', 'bio', 'nationality', 'dob', 'height', 'weight', 'foot', 'alt_position', 'state_origin', 'state_residence', 'current_club', 'career', 'phone', 'contact_email']
@@ -65,9 +66,10 @@ const CFG = {
   matches: { cols: ['opponent', 'match_date', 'venue', 'home_score', 'away_score', 'played'], file: 'opponent_logo', optional: 1 },
   goals: { cols: ['player_id', 'match_id', 'qty'] },
   potm: { cols: ['month', 'player_id', 'note'], dup: ' ON DUPLICATE KEY UPDATE player_id=VALUES(player_id),note=VALUES(note)' },
+  highlights: { cols: ['title', 'subtitle', 'body', 'category', 'active', 'sort_order'], file: 'image' },
   players: { cols: [] },
 }
-const FILECOLS = { hero_images: 'image', gallery: 'file', players: 'photo,photo2,photo3', matches: 'opponent_logo' }
+const FILECOLS = { hero_images: 'image', gallery: 'file', players: 'photo,photo2,photo3', matches: 'opponent_logo', highlights: 'image' }
 
 // Input/data mistakes get a clear message instead of a scary server error; real faults still log
 const INPUT = {
@@ -97,9 +99,11 @@ async function route(req, res, out) {
   switch (r) {
     case 'home': {
       const [hero, news, potm, scorers, next, hm] = await Promise.all([
-        q(LISTS.hero_images), q('SELECT * FROM news ORDER BY created_at DESC LIMIT 3'), q(LISTS.potm + ' LIMIT 1'), q(SCORERS),
-        q('SELECT * FROM matches WHERE played=0 AND match_date>=CURDATE() ORDER BY match_date LIMIT 1'), q("SELECT v FROM settings WHERE k='hero_mode'")])
-      return out({ hero, news, potm: potm[0] || null, scorers, next: next[0] || null, hero_mode: hm[0]?.v || 'scroll' })
+        q(LISTS.hero_images).catch(()=>[]), q('SELECT * FROM news ORDER BY created_at DESC LIMIT 3').catch(()=>[]), q((LISTS.potm||'SELECT * FROM potm') + ' LIMIT 1').catch(()=>[]), q(SCORERS).catch(()=>[]),
+        q('SELECT * FROM matches WHERE played=0 AND match_date>=CURDATE() ORDER BY match_date LIMIT 1').catch(()=>[]), q("SELECT v FROM settings WHERE k='hero_mode'").catch(()=>[])])
+      let highlights=[]
+      try{ highlights = await q('SELECT * FROM highlights WHERE active=1 ORDER BY sort_order,id DESC LIMIT 1') }catch{}
+      return out({ hero, news, potm: potm[0] || null, scorers, next: next[0] || null, hero_mode: hm[0]?.v || 'scroll', highlight: highlights[0] || null })
     }
     case 'list': {
       if (!LISTS[t]) return out({ error: 'Unknown list' }, 404)
@@ -198,6 +202,14 @@ async function route(req, res, out) {
         if (!urls.length) return out({ error: 'Choose at least one image.' }, 400)
         for (const u of urls) await q('INSERT INTO hero_images(image,caption,sort_order) VALUES(?,?,?)', [u, nul(b.caption), +b.sort_order || 0])
         return out({ ok: true, added: urls.length }, 201)
+      }
+      if (t === 'highlights') {
+        const urls = [].concat(b.file || []).filter(okUrl)
+        if (!urls.length) return out({ error: 'Choose an image.' }, 400)
+        const f = ['image'], v = [urls[0]]
+        for (const col of c.cols) if (b[col] !== undefined) { f.push(col); v.push(col === 'active' ? (b[col] ? 1 : 0) : nul(b[col])) }
+        await q(`INSERT INTO ${t}(${f.join(',')}) VALUES(${f.map(() => '?').join(',')})`, v)
+        return out({ ok: true }, 201)
       }
       const f = [], v = []
       for (const col of c.cols) if (b[col] !== undefined) { f.push(col); v.push(nul(b[col])) }
