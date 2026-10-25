@@ -15,7 +15,7 @@ export default function App() {
   const refresh = () => api('player_me').then(d => setMe(d.player)).catch(() => setMe(null))
   useEffect(() => { refresh() }, [])
   useEffect(() => { setOpen(false); window.scrollTo(0, 0) }, [loc.pathname])
-  const links = [['/', 'Home'], ['/news', 'News'], ['/matches', 'Matches'], ['/members', 'Members'], ['/gallery', 'Gallery'], ['/club', 'The Club'],
+  const links = [['/', 'Home'], ['/news', 'News'], ['/matches', 'Matches'], ['/members', 'Members'], ['/execos', 'Excos'], ['/gallery', 'Gallery'], ['/club', 'The Club'],
     me ? ['/account', 'My profile'] : ['/login', 'Player login'], ...(me ? [] : [['/register', 'Join the team']])]
   return (<>
     <header className="top"><Link to="/" className="logo"><img src={import.meta.env.BASE_URL + "llg.png"} alt="" />All Stars FC</Link>
@@ -23,7 +23,7 @@ export default function App() {
       <nav className={open ? 'open' : ''}>{links.map(([to, l]) => <NavLink key={to} to={to} end={to === '/'}>{l}</NavLink>)}</nav></header>
     <main><Routes>
       <Route path="/" element={<Home />} /><Route path="/news" element={<News />} /><Route path="/matches" element={<Matches />} />
-      <Route path="/members" element={<Members />} /><Route path="/player/:id" element={<Player />} />
+      <Route path="/members" element={<Members />} /><Route path="/execos" element={<Excos />} /><Route path="/player/:id" element={<Player />} />
       <Route path="/gallery" element={<Gallery />} /><Route path="/club" element={<Club />} />
       <Route path="/register" element={<Register refresh={refresh} />} />
       <Route path="/login" element={<Login refresh={refresh} />} /><Route path="/account" element={<Account me={me} refresh={refresh} />} />
@@ -102,7 +102,7 @@ function Home() {
       <aside>
         <h2>Player of the month</h2>
         {d.potm ? <Link to={`/player/${d.potm.player_id}`} className="potm-card">
-          <div className="potm-bg" style={d.potm.photo ? { backgroundImage: `url(${img(d.potm.photo)})` } : {}}>
+          <div className="potm-bg" style={(d.potm.potm_image || d.potm.photo) ? { backgroundImage: `url(${img(d.potm.potm_image || d.potm.photo)})` } : {}}>
             <div className="potm-overlay">
               <div className="potm-meta">
                 <small>PLAYER OF THE MONTH</small>
@@ -174,13 +174,22 @@ function Members() {
       : <Empty>Nobody has registered yet. <Link to="/register">Be the first</Link>.</Empty>}</div>
 }
 
+function Excos() {
+  const e = useApi('list', { t: 'execos' })
+  return <div className="wrap"><h1>Executive Committee</h1>
+    {e?.length ? <div className="cards">{e.map(x => <article key={x.id} className="card">
+      {x.photo ? <img src={img(x.photo)} alt={x.name} /> : <div className="ph">{x.name?.[0]}</div>}
+      <div><h3>{x.name}</h3><small>{x.position}</small>{x.bio && <p>{x.bio}</p>}</div></article>)}</div>
+      : <Empty>No excos added yet.</Empty>}</div>
+}
+
 function Player() {
   const { id } = useParams(); const p = useApi('player', { id })
   if (!p) return <Empty>Loading player…</Empty>
   const parts = p.name.trim().split(/\s+/); const last = parts.length > 1 ? parts.pop() : ''
   const rows = [['Nationality', p.nationality], ['D.O.B', p.dob], ['Position', p.position], ['Alternate position', p.alt_position],
     ['Height', p.height], ['Weight', p.weight], ['Preferred foot', p.foot], ['Shirt number', p.shirt_no],
-    ['State of origin', p.state_origin], ['State of residence', p.state_residence]].filter(r => r[1])
+    ['State of origin', p.state_origin], ['State of residence', p.state_residence], ['Emergency contact', p.emergency_contact], ['Phone', p.phone], ['Contact email', p.contact_email]].filter(r => r[1])
   const career = p.career?.split('\n').filter(Boolean) || []
   const shots = [p.photo2, p.photo3].filter(Boolean)
   return (<div className="pc">
@@ -259,7 +268,7 @@ function Login({ refresh }) {
 
 const MORE = [['nationality', 'Nationality'], ['dob', 'Date of birth', 'date'], ['height', 'Height (e.g. 1.70m)'], ['weight', 'Weight (e.g. 60kg)'],
   ['foot', 'Preferred foot', 'foot'], ['alt_position', 'Alternate position'], ['state_origin', 'State of origin'], ['state_residence', 'State of residence'],
-  ['current_club', 'Current club'], ['phone', 'Phone (shown publicly, optional)', 'tel'], ['contact_email', 'Contact email (shown publicly, optional)', 'email']]
+  ['current_club', 'Current club'], ['phone', 'Phone (shown publicly, optional)', 'tel'], ['contact_email', 'Contact email (shown publicly, optional)', 'email'], ['emergency_contact', 'Emergency contact']]
 
 function Account({ me, refresh }) {
   const nav = useNavigate(); const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [prev, setPrev] = useState('')
@@ -339,8 +348,9 @@ function Club() {
 const SECTIONS = {
   hero_images: ['Hero images', [['caption', 'Headline on image'], ['sort_order', 'Order', 'number'], ['file', 'Image', 'file']]],
   highlights: ['Highlight of the week/month', [['title', 'Title'], ['subtitle', 'Subtitle'], ['body', 'Text'], ['category', 'Category (week/month)'], ['active', 'Active', 'check'], ['sort_order', 'Order', 'number'], ['file', 'Image', 'file']]],
+  execos: ['Excos', [['name', 'Name'], ['position', 'Position'], ['bio', 'Bio', 'textarea'], ['sort_order', 'Order', 'number'], ['file', 'Photo', 'file']]],
   news: ['News', [['title', 'Title'], ['body', 'Story', 'textarea']]],
-  potm: ['Player of month', [['month', 'Month', 'month'], ['player_id', 'Player', 'player'], ['note', 'Why they won']]],
+  potm: ['Player of month', [['month', 'Month', 'month'], ['player_id', 'Player', 'player'], ['note', 'Why they won'], ['file', 'Custom photo (optional)', 'file']]],
   matches: ['Matches', [['opponent', 'Opponent'], ['file', 'Opponent logo (optional)', 'file'], ['match_date', 'Date', 'date'], ['venue', 'Venue'], ['home_score', 'All Stars goals', 'number'], ['away_score', 'Opponent goals', 'number'], ['played', 'Played', 'check']]],
   goals: ['Goals', [['player_id', 'Scorer', 'player'], ['match_id', 'Match', 'match'], ['qty', 'Goals', 'number']]],
   gallery: ['Gallery', [['caption', 'Caption'], ['category', 'Category', 'category'], ['file', 'Photo or video', 'file']]],

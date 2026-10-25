@@ -46,7 +46,7 @@ const setSess = (res, s) => {
   res.setHeader('Set-Cookie', `sess=${jwt.sign(x, E.JWT_SECRET, { expiresIn: '30d' })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
 }
 
-const PL = 'id,name,position,shirt_no,bio,photo,nationality,dob,height,weight,foot,alt_position,state_origin,state_residence,current_club,career,phone,contact_email,photo2,photo3,certified_on'
+const PL = 'id,name,position,shirt_no,bio,photo,nationality,dob,height,weight,foot,alt_position,state_origin,state_residence,current_club,career,phone,contact_email,emergency_contact,photo2,photo3,certified_on'
 const LISTS = {
   news: 'SELECT * FROM news ORDER BY created_at DESC',
   hero_images: 'SELECT * FROM hero_images ORDER BY sort_order,id',
@@ -54,22 +54,24 @@ const LISTS = {
   matches: 'SELECT * FROM matches ORDER BY match_date DESC',
   players: `SELECT ${PL} FROM players ORDER BY shirt_no,name`,
   goals: 'SELECT g.id,g.qty,p.name,m.opponent FROM goals g JOIN players p ON p.id=g.player_id LEFT JOIN matches m ON m.id=g.match_id ORDER BY g.id DESC',
-  potm: 'SELECT o.id,o.player_id,o.month,o.note,p.name,p.photo,p.position FROM potm o JOIN players p ON p.id=o.player_id ORDER BY o.month DESC',
+  potm: 'SELECT o.id,o.player_id,o.month,o.note,o.image as potm_image,p.name,p.photo,p.position FROM potm o JOIN players p ON p.id=o.player_id ORDER BY o.month DESC',
   highlights: 'SELECT * FROM highlights ORDER BY sort_order,id DESC',
+  execos: 'SELECT * FROM execos ORDER BY sort_order,id',
 }
 const SCORERS = 'SELECT p.id,p.name,p.photo,SUM(g.qty) goals FROM goals g JOIN players p ON p.id=g.player_id GROUP BY p.id ORDER BY goals DESC LIMIT 10'
-const PCOLS = ['name', 'position', 'shirt_no', 'bio', 'nationality', 'dob', 'height', 'weight', 'foot', 'alt_position', 'state_origin', 'state_residence', 'current_club', 'career', 'phone', 'contact_email']
+const PCOLS = ['name', 'position', 'shirt_no', 'bio', 'nationality', 'dob', 'height', 'weight', 'foot', 'alt_position', 'state_origin', 'state_residence', 'current_club', 'career', 'phone', 'contact_email', 'emergency_contact']
 const CFG = {
   news: { cols: ['title', 'body'] },
   hero_images: { cols: ['caption', 'sort_order'], file: 'image' },
   gallery: { cols: ['caption', 'category'], file: 'file', typed: 1 },
   matches: { cols: ['opponent', 'match_date', 'venue', 'home_score', 'away_score', 'played'], file: 'opponent_logo', optional: 1 },
   goals: { cols: ['player_id', 'match_id', 'qty'] },
-  potm: { cols: ['month', 'player_id', 'note'], dup: ' ON DUPLICATE KEY UPDATE player_id=VALUES(player_id),note=VALUES(note)' },
+  potm: { cols: ['month', 'player_id', 'note'], file: 'image', optional: 1, dup: ' ON DUPLICATE KEY UPDATE player_id=VALUES(player_id),note=VALUES(note),image=VALUES(image)' },
   highlights: { cols: ['title', 'subtitle', 'body', 'category', 'active', 'sort_order'], file: 'image' },
+  execos: { cols: ['name', 'position', 'bio', 'sort_order'], file: 'photo' },
   players: { cols: [] },
 }
-const FILECOLS = { hero_images: 'image', gallery: 'file', players: 'photo,photo2,photo3', matches: 'opponent_logo', highlights: 'image' }
+const FILECOLS = { hero_images: 'image', gallery: 'file', players: 'photo,photo2,photo3', matches: 'opponent_logo', highlights: 'image', potm: 'image', execos: 'photo' }
 
 // Input/data mistakes get a clear message instead of a scary server error; real faults still log
 const INPUT = {
@@ -208,6 +210,28 @@ async function route(req, res, out) {
         if (!urls.length) return out({ error: 'Choose an image.' }, 400)
         const f = ['image'], v = [urls[0]]
         for (const col of c.cols) if (b[col] !== undefined) { f.push(col); v.push(col === 'active' ? (b[col] ? 1 : 0) : nul(b[col])) }
+        await q(`INSERT INTO ${t}(${f.join(',')}) VALUES(${f.map(() => '?').join(',')})`, v)
+        return out({ ok: true }, 201)
+      }
+      if (t === 'potm') {
+        const f = [], v = []
+        for (const col of c.cols) if (b[col] !== undefined) { f.push(col); v.push(nul(b[col])) }
+        if (b.file) {
+          if (!okUrl(b.file)) return out({ error: 'Bad file link.' }, 400)
+          f.push('image'); v.push(b.file)
+        }
+        await q(`INSERT INTO ${t}(${f.join(',')}) VALUES(${f.map(() => '?').join(',')})${c.dup || ''}`, v)
+        return out({ ok: true }, 201)
+      }
+      if (t === 'execos') {
+        const f = [], v = []
+        for (const col of c.cols) if (b[col] !== undefined) { f.push(col); v.push(nul(b[col])) }
+        if (c.file) {
+          if (b.file) {
+            if (!okUrl(b.file)) return out({ error: 'Bad file link.' }, 400)
+            f.push(c.file); v.push(b.file)
+          } else return out({ error: 'Please choose a photo.' }, 400)
+        }
         await q(`INSERT INTO ${t}(${f.join(',')}) VALUES(${f.map(() => '?').join(',')})`, v)
         return out({ ok: true }, 201)
       }
