@@ -20,6 +20,7 @@ async function ensureSchema() {
       "ALTER TABLE potm ADD COLUMN likes INT NOT NULL DEFAULT 0",
       "ALTER TABLE potm ADD COLUMN views INT NOT NULL DEFAULT 0",
       "ALTER TABLE potm ADD COLUMN image VARCHAR(255)",
+      "ALTER TABLE matches ADD COLUMN opponent_logo VARCHAR(255)",
       "ALTER TABLE players ADD COLUMN emergency_contact VARCHAR(150)",
       "ALTER TABLE highlights ADD COLUMN likes INT NOT NULL DEFAULT 0",
       "ALTER TABLE highlights ADD COLUMN views INT NOT NULL DEFAULT 0",
@@ -115,7 +116,7 @@ const INPUT = {
   ER_TRUNCATED_WRONG_VALUE: 'One of the values has the wrong format.',
 }
 export default async function handler(req, res) {
-  const out = (d, c = 200) => res.status(c).json(d)
+  const out = (d, c = 200) => { res.setHeader('Cache-Control', 'no-store'); return res.status(c).json(d) }
   try { return await route(req, res, out) }
   catch (e) {
     console.error(`${req.method} ${req.url} ::`, e.code || '', e.sqlMessage || e.message)
@@ -294,13 +295,16 @@ async function route(req, res, out) {
             set.push(`${col}=?`)
             v.push(col === 'played' ? (b[col] ? 1 : 0) : col === 'home_score' || col === 'away_score' ? (b[col] === '' || b[col] == null ? null : +b[col]) : nul(b[col]))
           }
+          let oldLogo
           if (b.file) {
             if (!okUrl(b.file)) return out({ error: 'Bad file link.' }, 400)
-            await cldDelete((await one('SELECT opponent_logo v FROM matches WHERE id=?', [id]))?.v)
+            oldLogo = (await one('SELECT opponent_logo v FROM matches WHERE id=?', [id]))?.v
             set.push('opponent_logo=?'); v.push(b.file)
           }
           if (!set.length) return out({ ok: true })
-          await q(`UPDATE matches SET ${set.join(',')} WHERE id=?`, [...v, id]); return out({ ok: true })
+          await q(`UPDATE matches SET ${set.join(',')} WHERE id=?`, [...v, id])
+          if (oldLogo) await cldDelete(oldLogo)
+          return out({ ok: true })
         }
       }
       if (m !== 'POST' || !(c.cols.length || t === 'players')) return out({ error: 'Not allowed' }, 405)

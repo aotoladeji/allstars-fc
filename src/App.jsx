@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Routes, Route, NavLink, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { api, formData, img, uploadToCloud, useApi } from './api'
+import { ACTION_END, ACTION_MESSAGE, ACTION_START, api, formData, img, notifyDataChanged, notifySuccess, runAction, uploadToCloud, useApi } from './api'
 import { INTRO, GLANCE, JOIN, FINES, RULES } from './clubInfo'
 
 const DEFAULT_LOGO = import.meta.env.BASE_URL + 'llg.png'
@@ -11,20 +11,53 @@ const Empty = ({ children }) => <p className="empty">{children}</p>
 const Face = ({ p, cls = '' }) => p.photo ? <img className={cls} src={img(p.photo)} alt={p.name} /> : <div className={'ph ' + cls}>{p.name?.[0]}</div>
 const Cert = ({ on, small }) => <span className={'cert-badge' + (small ? ' sm' : '')} title={`Certified member since ${fmt(on)}`}>
   ✓ Certified member{!small && <em> since {fmt(on)}</em>}</span>
+const Spin = () => <i className="spin" aria-hidden="true" />
+const useBusyAction = () => {
+  const [busy, setBusy] = useState(false)
+  const run = async (task, success) => {
+    setBusy(true)
+    try { return await runAction(task, success) } finally { setBusy(false) }
+  }
+  return [busy, run]
+}
+const Feedback = () => {
+  const [pending, setPending] = useState(0)
+  const [toast, setToast] = useState(null)
+  useEffect(() => {
+    const start = () => setPending(n => n + 1)
+    const end = () => setPending(n => Math.max(0, n - 1))
+    const onMessage = e => setToast({ ...e.detail, id: Date.now() + Math.random() })
+    window.addEventListener(ACTION_START, start)
+    window.addEventListener(ACTION_END, end)
+    window.addEventListener(ACTION_MESSAGE, onMessage)
+    return () => {
+      window.removeEventListener(ACTION_START, start)
+      window.removeEventListener(ACTION_END, end)
+      window.removeEventListener(ACTION_MESSAGE, onMessage)
+    }
+  }, [])
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t) }, [toast])
+  return <>
+    {pending > 0 && <div className="busy-bar"><i /></div>}
+    {toast && <div className={'toast ' + (toast.type === 'error' ? 'err' : 'ok')} role="status">{toast.text}<button aria-label="Dismiss" onClick={() => setToast(null)}>×</button></div>}
+  </>
+}
 
 const site = () => window.location.origin + window.location.pathname
 const shareLink = (hash, u) => u || (site() + hash)
 const doShare = async (title, text, url) => {
-  if (navigator.share) { try { await navigator.share({ title, text, url }) } catch {} return }
-  try { await navigator.clipboard.writeText(url) } catch {}
+  if (navigator.share) { try { await navigator.share({ title, text, url }); notifySuccess('Shared.') } catch {} return }
+  let copied = false
+  try { await navigator.clipboard.writeText(url); copied = true } catch {}
   const enc = encodeURIComponent(url), et = encodeURIComponent(text || title)
   window.open(`https://wa.me/?text=${et}%20${enc}`, '_blank')
+  notifySuccess(copied ? 'Link copied.' : 'Share link ready.')
 }
 const ShareBtn = ({ title, text, url, hash, cls = '' }) => <button type="button" className={'icon-btn' + (cls ? ' ' + cls : '')} onClick={e => { e.preventDefault(); e.stopPropagation(); doShare(title, text, shareLink(hash, url)) }}>Share</button>
-const StatBar = ({ likes = 0, views, comments, liked, onLike, onComment }) => <div className="statbar">
-  <button type="button" className={'icon-btn' + (liked ? ' liked' : '')} onClick={e => { e.preventDefault(); e.stopPropagation(); onLike && onLike() }}>♥ {likes}</button>
+const StatBar = ({ likes = 0, views, comments, liked, busy, onLike, onComment }) => <div className="statbar">
+  <button type="button" className={'icon-btn' + (liked ? ' liked' : '')} disabled={busy} onClick={e => { e.preventDefault(); e.stopPropagation(); onLike && onLike() }}>{busy && <Spin />}♥ {likes}</button>
   {views != null && <span className="stat">👁 {views}</span>}
-  {comments != null && <button type="button" className="icon-btn" onClick={e => { e.preventDefault(); e.stopPropagation(); onComment && onComment() }}>💬 {comments}</button>}
+  {comments != null && <button type="button" className="icon-btn" disabled={busy} onClick={e => { e.preventDefault(); e.stopPropagation(); onComment && onComment() }}>{busy && <Spin />}💬 {comments}</button>}
 </div>
 
 export default function App() {
@@ -44,6 +77,7 @@ export default function App() {
   const links = [['/', 'Home'], ['/news', 'News'], ['/matches', 'Matches'], ['/members', 'Members'], ['/execos', 'Excos'], ['/gallery', 'Gallery'], ['/club', 'The Club'],
     me ? ['/account', 'My profile'] : ['/login', 'Player login'], ...(me ? [] : [['/register', 'Join the team']])]
   return (<LogoContext.Provider value={logo}>
+    <Feedback />
     <header className="top"><Link to="/" className="logo"><img src={logo} alt="" />All Stars FC</Link>
       <button className="burger" aria-label="Menu" aria-expanded={open} onClick={() => setOpen(!open)}><span /><span /><span /></button>
       <nav className={open ? 'open' : ''}>{links.map(([to, l]) => <NavLink key={to} to={to} end={to === '/'}>{l}</NavLink>)}</nav></header>
@@ -512,16 +546,17 @@ function Section({ t }) {
   const [label, fields] = SECTIONS[t]; const [n, setN] = useState(0); const [err, setErr] = useState('')
   const rows = useApi(t === 'players' ? 'admin_players' : 'list', { t }, n); const players = useApi('list', { t: 'players' })
     const ms = useApi('list', { t: 'matches' }, n)
+  const changed = () => { setN(x => x + 1); notifyDataChanged() }
   const result = async r => {
     const a = prompt(`All Stars goals vs ${r.opponent}?`, r.home_score ?? 0); if (a === null) return
     const b = prompt(`${r.opponent} goals?`, r.away_score ?? 0); if (b === null) return
-    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, home_score: a, away_score: b } }); setN(n + 1)
+    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, home_score: a, away_score: b } }); changed()
   }
   const add = async e => { e.preventDefault(); setErr('')
     try {
       const b = await formData(e.target)
       await api('admin', { method: 'POST', params: { t }, body: b })
-      e.target.reset(); setN(n + 1)
+      e.target.reset(); changed()
     } catch (x) { setErr(x.message) } }
   const editExco = async r => {
     if (t !== 'execos') return
@@ -529,7 +564,7 @@ function Section({ t }) {
     const position = prompt('Position', r.position || '') ?? r.position
     const bio = prompt('Bio', r.bio || '') ?? r.bio
     const sort_order = prompt('Order', r.sort_order ?? 0) ?? r.sort_order
-    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }); setN(n+1) } catch(x){ alert(x.message) }
+    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }); changed() } catch(x){ alert(x.message) }
   }
   const editExcoPhoto = async r => {
     if (t !== 'execos') return
@@ -543,8 +578,12 @@ function Section({ t }) {
         fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
         const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
         const j = await up.json()
-        if (j.secure_url) { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } }); setN(n+1) }
-      } catch(x){ alert('Failed') }
+        if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
+        if (!j.secure_url) throw new Error('Upload failed')
+        await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
+        changed()
+        alert('Photo updated.')
+      } catch(x){ alert(x.message || 'Failed') }
     }
     input.click()
   }
@@ -556,7 +595,7 @@ function Section({ t }) {
     const home_score = prompt('All Stars goals (leave blank if not played)', r.home_score ?? '') ?? r.home_score
     const away_score = prompt('Opponent goals (leave blank if not played)', r.away_score ?? '') ?? r.away_score
     const played = confirm('Mark as played? OK = Yes, Cancel = No')
-    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, opponent, match_date, venue, home_score, away_score, played: played ? 1 : 0, update: 1 } }); setN(n+1) } catch(x){ alert(x.message) }
+    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, opponent, match_date, venue, home_score, away_score, played: played ? 1 : 0, update: 1 } }); changed() } catch(x){ alert(x.message) }
   }
   const editMatchLogo = async r => {
     if (t !== 'matches') return
@@ -570,13 +609,17 @@ function Section({ t }) {
         fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
         const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
         const j = await up.json()
-        if (j.secure_url) { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } }); setN(n+1) }
-      } catch(x){ alert('Failed') }
+        if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
+        if (!j.secure_url) throw new Error('Upload failed')
+        await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
+        changed()
+        alert('Opponent logo updated.')
+      } catch(x){ alert(x.message || 'Failed') }
     }
     input.click()
   }
-  const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); setN(n + 1) } }
-  const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); setN(n + 1) }
+  const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); changed() } }
+  const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); changed() }
   const multi = t === 'hero_images'
      const input = ([k, l, ty]) => <label key={k}>{l}{ty === 'textarea' ? <textarea name={k} rows="4" />
     : ty === 'player' ? <select name={k} required>{players?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -588,7 +631,7 @@ function Section({ t }) {
   return (<div><h2>{label}</h2>
     {fields.length > 0 && <form className="form" onSubmit={add}>{fields.map(input)}{err && <p className="err">{err}</p>}<button className="btn">{multi ? 'Upload' : 'Add'}</button></form>}
         <ul className="rows">{rows?.map(r => <li key={r.id}>
-      <span>{(r.image||r.photo) && <img className="thumb" src={img(r.image||r.photo)} alt="" />}{[r.title, r.opponent, r.name, r.position, r.month, r.caption, r.qty && `x${r.qty}`].filter(Boolean).join(' · ') || `#${r.id}`}
+      <span>{(r.image||r.photo||r.opponent_logo) && <img className="thumb" src={img(r.image||r.photo||r.opponent_logo)} alt="" />}{[r.title, r.opponent, r.name, r.position, r.month, r.caption, r.qty && `x${r.qty}`].filter(Boolean).join(' · ') || `#${r.id}`}
         {r.certified_on && <em className="since"> ✓ certified {fmt(r.certified_on)}</em>}</span>
         {r.introduced_by && <em className="since"> · introduced by {r.introduced_by}</em>}
         <span className="btns">
