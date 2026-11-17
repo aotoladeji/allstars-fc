@@ -6,10 +6,34 @@ import CA from '../lib/ca.js'
 
 const E = process.env
 
-// ---- Database (Aiven needs SSL, which is what the CA certificate is for) ----
-let pool
+// ---- Database (hosted Aiven needs SSL; a local MySQL/XAMPP does not) ----
+const localDb = () => /^(localhost|127\.0\.0\.1|::1)$/.test(E.DB_HOST || '')
+let pool, ready
 const db = () => (pool ??= mysql.createPool({ host: E.DB_HOST, port: +E.DB_PORT, user: E.DB_USER, password: E.DB_PASS, database: E.DB_NAME,
-  ssl: { ca: CA, rejectUnauthorized: false }, connectionLimit: 1, dateStrings: true, connectTimeout: 8000, enableKeepAlive: true }))
+  ssl: localDb() ? undefined : { ca: CA, rejectUnauthorized: false }, connectionLimit: 1, dateStrings: true, connectTimeout: 8000, enableKeepAlive: true }))
+async function ensureSchema() {
+  if (ready) return ready
+  ready = (async () => {
+    const stmts = [
+      "ALTER TABLE gallery ADD COLUMN likes INT NOT NULL DEFAULT 0",
+      "ALTER TABLE gallery ADD COLUMN views INT NOT NULL DEFAULT 0",
+      "ALTER TABLE potm ADD COLUMN likes INT NOT NULL DEFAULT 0",
+      "ALTER TABLE potm ADD COLUMN views INT NOT NULL DEFAULT 0",
+      "ALTER TABLE potm ADD COLUMN image VARCHAR(255)",
+      "ALTER TABLE players ADD COLUMN emergency_contact VARCHAR(150)",
+      "ALTER TABLE highlights ADD COLUMN likes INT NOT NULL DEFAULT 0",
+      "ALTER TABLE highlights ADD COLUMN views INT NOT NULL DEFAULT 0",
+      "CREATE TABLE IF NOT EXISTS execos(id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, position VARCHAR(100) NOT NULL, photo VARCHAR(255), bio TEXT, sort_order INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS settings(k VARCHAR(50) PRIMARY KEY, v VARCHAR(255))",
+      "CREATE TABLE IF NOT EXISTS gallery_comments(id INT AUTO_INCREMENT PRIMARY KEY, gallery_id INT NOT NULL, parent_id INT NULL, author_name VARCHAR(100) NOT NULL, body TEXT NOT NULL, likes INT NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(gallery_id) REFERENCES gallery(id) ON DELETE CASCADE)",
+      "ALTER TABLE gallery_comments ADD COLUMN parent_id INT NULL",
+      "ALTER TABLE gallery_comments ADD COLUMN likes INT NOT NULL DEFAULT 0",
+      "CREATE TABLE IF NOT EXISTS view_logs(t VARCHAR(20) NOT NULL, item_id INT NOT NULL, visitor CHAR(40) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(t,item_id,visitor))"
+    ]
+    for (const s of stmts) try { await q(s) } catch {}
+  })()
+  return ready
+}
 const RETRY = ['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'PROTOCOL_SEQUENCE_TIMEOUT']
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const reset = () => { const old = pool; pool = undefined; try { old?.end().catch(() => {}) } catch {} }
@@ -46,6 +70,12 @@ const setSess = (res, s) => {
   res.setHeader('Set-Cookie', `sess=${jwt.sign(x, E.JWT_SECRET, { expiresIn: '30d' })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
 }
 
+// A stable per-visitor key for one-view-per-person counters (IP + browser)
+const visitorId = req => {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.headers['x-real-ip'] || req.socket?.remoteAddress || ''
+  return crypto.createHash('sha1').update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex')
+}
+
 const PL = 'id,name,position,shirt_no,bio,photo,nationality,dob,height,weight,foot,alt_position,state_origin,state_residence,current_club,career,phone,contact_email,emergency_contact,photo2,photo3,certified_on'
 const LISTS = {
   news: 'SELECT * FROM news ORDER BY created_at DESC',
@@ -54,7 +84,7 @@ const LISTS = {
   matches: 'SELECT * FROM matches ORDER BY match_date DESC',
   players: `SELECT ${PL} FROM players ORDER BY shirt_no,name`,
   goals: 'SELECT g.id,g.qty,p.name,m.opponent FROM goals g JOIN players p ON p.id=g.player_id LEFT JOIN matches m ON m.id=g.match_id ORDER BY g.id DESC',
-  potm: 'SELECT o.id,o.player_id,o.month,o.note,o.image as potm_image,p.name,p.photo,p.position FROM potm o JOIN players p ON p.id=o.player_id ORDER BY o.month DESC',
+  potm: 'SELECT o.id,o.player_id,o.month,o.note,o.image as potm_image,o.likes,o.views,p.name,p.photo,p.position FROM potm o JOIN players p ON p.id=o.player_id ORDER BY o.month DESC',
   highlights: 'SELECT * FROM highlights ORDER BY sort_order,id DESC',
   execos: 'SELECT * FROM execos ORDER BY sort_order,id',
 }
@@ -95,8 +125,10 @@ export default async function handler(req, res) {
 }
 
 async function route(req, res, out) {
+  await ensureSchema()
   const { r = '', t = '' } = req.query; const m = req.method; const S = getSess(req)
   const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const ENGAGE = { gallery: { table: 'gallery', like: 1, view: 1, comment: 1 }, potm: { table: 'potm', like: 1, view: 1 }, highlights: { table: 'highlights', like: 1, view: 1 } }
 
   switch (r) {
     case 'home': {
@@ -115,7 +147,39 @@ async function route(req, res, out) {
         rows.forEach(x => { x.scorers = g.filter(y => y.match_id == x.id) })
       }
       if (t === 'players') rows.forEach(x => { x.dob = mdob(x.dob) })
+      if (t === 'gallery') {
+        const c = await q('SELECT gallery_id, COUNT(*) n FROM gallery_comments GROUP BY gallery_id').catch(()=>[])
+        rows.forEach(x => { x.comments = +(c.find(y => y.gallery_id == x.id)?.n || 0) })
+      }
       return out(rows)
+    }
+    case 'engage': {
+      const et = ENGAGE[t]; const id = +req.query.id || 0, action = req.query.action || ''
+      if (!et || !id) return out({ error: 'Unknown item' }, 404)
+      if (action === 'like' && et.like) { await q(`UPDATE ${et.table} SET likes = likes + 1 WHERE id=?`, [id]); return out(await one(`SELECT likes,views FROM ${et.table} WHERE id=?`, [id]) || {}) }
+      if (action === 'view' && et.view) { // one view per visitor per item
+        const ins = await q('INSERT IGNORE INTO view_logs(t,item_id,visitor) VALUES(?,?,?)', [t, id, visitorId(req)])
+        if (ins.affectedRows) await q(`UPDATE ${et.table} SET views = views + 1 WHERE id=?`, [id])
+        return out(await one(`SELECT likes,views FROM ${et.table} WHERE id=?`, [id]) || {})
+      }
+      if (action === 'comments' && et.comment) return out(await q('SELECT id,parent_id,author_name,body,likes,created_at FROM gallery_comments WHERE gallery_id=? ORDER BY created_at ASC', [id]))
+      if (action === 'comment_like' && et.comment) {
+        if (m !== 'POST') return out({ error: 'POST only' }, 405)
+        const cid = +req.query.cid || 0
+        if (!cid) return out({ error: 'Unknown comment' }, 404)
+        await q('UPDATE gallery_comments SET likes = likes + 1 WHERE id=? AND gallery_id=?', [cid, id])
+        return out(await one('SELECT id,likes FROM gallery_comments WHERE id=? AND gallery_id=?', [cid, id]) || {})
+      }
+      if (action === 'comment' && et.comment) {
+        if (m !== 'POST') return out({ error: 'POST only' }, 405)
+        const author = (b.author_name || 'Fan').trim().slice(0, 100) || 'Fan', body = (b.body || '').trim()
+        if (!body) return out({ error: 'Enter a comment.' }, 400)
+        let parent = b.parent_id ? +b.parent_id : null
+        if (parent && !(await one('SELECT 1 x FROM gallery_comments WHERE id=? AND gallery_id=?', [parent, id]))) parent = null
+        await q('INSERT INTO gallery_comments(gallery_id,parent_id,author_name,body) VALUES(?,?,?,?)', [id, parent, author, body.slice(0, 1000)])
+        return out(await q('SELECT id,parent_id,author_name,body,likes,created_at FROM gallery_comments WHERE gallery_id=? ORDER BY created_at ASC', [id]), 201)
+      }
+      return out({ error: 'Not allowed' }, 405)
     }
     case 'player': {
       const p = await one(`SELECT ${PL},created_at FROM players WHERE id=?`, [req.query.id || 0])
@@ -208,6 +272,21 @@ async function route(req, res, out) {
           }
           if (!set.length) return out({ ok: true })
           await q(`UPDATE execos SET ${set.join(',')} WHERE id=?`, [...v, id]); return out({ ok: true })
+        }
+        if (t === 'matches') {
+          const id = +b.id || 0
+          const set = [], v = []
+          for (const col of c.cols) if (b[col] !== undefined) {
+            set.push(`${col}=?`)
+            v.push(col === 'played' ? (b[col] ? 1 : 0) : col === 'home_score' || col === 'away_score' ? (b[col] === '' || b[col] == null ? null : +b[col]) : nul(b[col]))
+          }
+          if (b.file) {
+            if (!okUrl(b.file)) return out({ error: 'Bad file link.' }, 400)
+            await cldDelete((await one('SELECT opponent_logo v FROM matches WHERE id=?', [id]))?.v)
+            set.push('opponent_logo=?'); v.push(b.file)
+          }
+          if (!set.length) return out({ ok: true })
+          await q(`UPDATE matches SET ${set.join(',')} WHERE id=?`, [...v, id]); return out({ ok: true })
         }
       }
       if (m !== 'POST' || !(c.cols.length || t === 'players')) return out({ error: 'Not allowed' }, 405)

@@ -10,6 +10,21 @@ const Face = ({ p, cls = '' }) => p.photo ? <img className={cls} src={img(p.phot
 const Cert = ({ on, small }) => <span className={'cert-badge' + (small ? ' sm' : '')} title={`Certified member since ${fmt(on)}`}>
   ✓ Certified member{!small && <em> since {fmt(on)}</em>}</span>
 
+const site = () => window.location.origin + window.location.pathname
+const shareLink = (hash, u) => u || (site() + hash)
+const doShare = async (title, text, url) => {
+  if (navigator.share) { try { await navigator.share({ title, text, url }) } catch {} return }
+  try { await navigator.clipboard.writeText(url) } catch {}
+  const enc = encodeURIComponent(url), et = encodeURIComponent(text || title)
+  window.open(`https://wa.me/?text=${et}%20${enc}`, '_blank')
+}
+const ShareBtn = ({ title, text, url, hash, cls = '' }) => <button type="button" className={'icon-btn' + (cls ? ' ' + cls : '')} onClick={e => { e.preventDefault(); e.stopPropagation(); doShare(title, text, shareLink(hash, url)) }}>Share</button>
+const StatBar = ({ likes = 0, views, comments, liked, onLike, onComment }) => <div className="statbar">
+  <button type="button" className={'icon-btn' + (liked ? ' liked' : '')} onClick={e => { e.preventDefault(); e.stopPropagation(); onLike && onLike() }}>♥ {likes}</button>
+  {views != null && <span className="stat">👁 {views}</span>}
+  {comments != null && <button type="button" className="icon-btn" onClick={e => { e.preventDefault(); e.stopPropagation(); onComment && onComment() }}>💬 {comments}</button>}
+</div>
+
 export default function App() {
   const [me, setMe] = useState(undefined); const [open, setOpen] = useState(false); const loc = useLocation()
   const refresh = () => api('player_me').then(d => setMe(d.player)).catch(() => setMe(null))
@@ -55,7 +70,12 @@ function Hero({ slides, mode, next }) {
 
 function Highlight({ h }) {
   const [open, setOpen] = useState(false)
+  const [st, setSt] = useState(null)
+  const [liked, setLiked] = useState(false)
+  useEffect(() => { if (h) { setSt({ likes: +h.likes || 0, views: +h.views || 0 }); setLiked(false); api('engage', { method: 'POST', params: { t: 'highlights', id: h.id, action: 'view' } }).then(d => d && setSt(s => ({ ...s, ...d }))).catch(()=>{}) } }, [h?.id])
   if (!h) return null
+  const like = async () => { if (liked) return; setLiked(true); try { const d = await api('engage', { method: 'POST', params: { t: 'highlights', id: h.id, action: 'like' } }); setSt(s => ({ ...s, ...d })) } catch {} }
+  const shareUrl = shareLink('#/')
   return <>
     <section className="highlight">
       <div className="wrap wide highlight-card">
@@ -66,7 +86,11 @@ function Highlight({ h }) {
             {h.title && <h2>{h.title}</h2>}
             {h.subtitle && <h3>{h.subtitle}</h3>}
             {h.body && <p className="hl-body">{h.body.length > 180 ? h.body.slice(0, 177) + '...' : h.body}</p>}
-            {(h.body && h.body.length > 0) || h.subtitle ? <button className="hl-read" onClick={() => setOpen(true)}>Read more</button> : null}
+            <div className="actions-row">
+              <StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} onLike={like} />
+              <ShareBtn title={h.title || 'Highlight'} text={h.subtitle || h.title || 'Check this out'} url={shareUrl} />
+              {(h.body || h.subtitle) ? <button className="hl-read" onClick={() => setOpen(true)}>View</button> : null}
+            </div>
           </div>
         </div>
       </div>
@@ -80,6 +104,7 @@ function Highlight({ h }) {
           {h.title && <h2>{h.title}</h2>}
           {h.subtitle && <h3>{h.subtitle}</h3>}
           {h.body && <p>{h.body}</p>}
+          <div className="actions-row"><StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} onLike={like} /><ShareBtn title={h.title || 'Highlight'} text={h.subtitle || h.title || ''} url={shareUrl} /></div>
         </div>
       </div>
     </div>}
@@ -101,18 +126,7 @@ function Home() {
         <Link to="/news">All news</Link></section>
       <aside>
         <h2>Player of the month</h2>
-        {d.potm ? <Link to={`/player/${d.potm.player_id}`} className="potm-card">
-          <div className="potm-bg" style={(d.potm.potm_image || d.potm.photo) ? { backgroundImage: `url(${img(d.potm.potm_image || d.potm.photo)})` } : {}}>
-            <div className="potm-overlay">
-              <div className="potm-meta">
-                <small>PLAYER OF THE MONTH</small>
-                <h3>{d.potm.name}</h3>
-                <span>{d.potm.month}</span>
-              </div>
-            </div>
-          </div>
-          {d.potm.note && <div className="potm-note"><p>{d.potm.note}</p></div>}
-        </Link> : <Empty>Not chosen yet.</Empty>}
+        {d.potm ? <PotmHome p={d.potm} /> : <Empty>Not chosen yet.</Empty>}
       </aside>
     </div>
     <section className="band"><div className="wrap"><h2>Goal chart</h2>
@@ -120,6 +134,29 @@ function Home() {
         <span>{s.name}</span><i style={{ width: `${(s.goals / max) * 100}%` }} /><b>{s.goals}</b></Link>) : <Empty>No goals recorded yet.</Empty>}
     </div></section>
   </>)
+}
+
+function PotmHome({ p }) {
+  const [st, setSt] = useState({ likes: +p.likes || 0, views: +p.views || 0 })
+  const [liked, setLiked] = useState(false)
+  useEffect(() => { setSt({ likes: +p.likes || 0, views: +p.views || 0 }); setLiked(false); api('engage', { method: 'POST', params: { t: 'potm', id: p.id, action: 'view' } }).then(d => d && setSt(s => ({ ...s, ...d }))).catch(()=>{}) }, [p.id])
+  const like = async () => { if (liked) return; setLiked(true); try { const d = await api('engage', { method: 'POST', params: { t: 'potm', id: p.id, action: 'like' } }); setSt(s => ({ ...s, ...d })) } catch {} }
+  return <div className="potm-card">
+    <Link to={`/player/${p.player_id}`} className="potm-bg" style={(p.potm_image || p.photo) ? { backgroundImage: `url(${img(p.potm_image || p.photo)})` } : {}}>
+      <div className="potm-overlay">
+        <div className="potm-meta">
+          <small>PLAYER OF THE MONTH</small>
+          <h3>{p.name}</h3>
+          <span>{p.month}</span>
+        </div>
+      </div>
+    </Link>
+    {p.note && <div className="potm-note"><p>{p.note}</p></div>}
+    <div className="potm-actions actions-row">
+      <StatBar likes={st.likes} views={st.views} liked={liked} onLike={like} />
+      <ShareBtn title={`Player of the Month: ${p.name}`} text={`${p.name} is Player of the Month (${p.month})`} url={shareLink(`#/player/${p.player_id}`)} />
+    </div>
+  </div>
 }
 
 function NewsBanner({ n }) {
@@ -136,6 +173,8 @@ function NewsBanner({ n }) {
 
 function Scoreboard({ m }) {
   const played = +m.played
+  const title = `All Stars FC vs ${m.opponent}`
+  const text = played ? `${title} ${m.home_score}-${m.away_score} (${fmt(m.match_date)})` : `${title} on ${fmt(m.match_date)}${m.venue ? ' at ' + m.venue : ''}`
   return <article className="match">
     <div className="sb">
       <div className="sb-logo l"><img src={LOGO} alt="All Stars FC" /></div>
@@ -144,9 +183,10 @@ function Scoreboard({ m }) {
       <div className="sb-team">{m.opponent}</div>
       <div className="sb-logo r">{m.opponent_logo ? <img src={img(m.opponent_logo)} alt={m.opponent} /> : <span>{m.opponent[0]}</span>}</div>
     </div>
-    <p className="sb-venue">{m.venue || ''}{!played && ' · Kick-off to be confirmed'}</p>
+    <p className="sb-venue">{m.venue || ''}{!played && ' • Kick-off to be confirmed'}</p>
     {m.scorers?.length > 0 && <div className="scorers"><small>Goals</small>
       {m.scorers.map(s => <Link key={s.pid} to={`/player/${s.pid}`}>{s.name}{+s.qty > 1 && ` ×${s.qty}`}</Link>)}</div>}
+    <div className="actions-row center"><ShareBtn title={title} text={text} url={shareLink('#/matches')} /></div>
   </article>
 }
 
@@ -170,7 +210,8 @@ function Members() {
   return <div className="wrap"><h1>The squad</h1>
     {p?.length ? <div className="cards">{p.map(x => <Link key={x.id} to={`/player/${x.id}`} className="card">
       <Face p={x} /><div><h3>{x.name}</h3><small>{x.shirt_no ? `#${x.shirt_no} · ` : ''}{x.position}</small>
-        {x.certified_on && <div><Cert on={x.certified_on} small /></div>}<p>{x.bio?.slice(0, 110)}</p></div></Link>)}</div>
+        {x.certified_on && <div><Cert on={x.certified_on} small /></div>}<p>{x.bio?.slice(0, 110)}</p>
+        <div className="actions-row"><ShareBtn title={x.name} text={`${x.name} - All Stars FC`} url={shareLink(`#/player/${x.id}`)} /></div></div></Link>)}</div>
       : <Empty>Nobody has registered yet. <Link to="/register">Be the first</Link>.</Empty>}</div>
 }
 
@@ -212,21 +253,115 @@ function Player() {
   </div>)
 }
 
+const GAL_FILTERS = [['all', 'All'], ['image', 'Photos'], ['video', 'Videos']]
+
 function Gallery() {
-  const g = useApi('list', { t: 'gallery' }); const [open, setOpen] = useState(null)
-  const [type, setType] = useState('all'); const [cat, setCat] = useState('all')
-  const cats = [...new Set(g?.map(x => x.category))]
-  const shown = g?.filter(x => (type === 'all' || x.type === type) && (cat === 'all' || x.category === cat))
-  const Chip = ({ v, cur, set, children }) => <button className={'chip' + (cur === v ? ' on' : '')} onClick={() => set(v)}>{children}</button>
+  const [n, setN] = useState(0)
+  const g = useApi('list', { t: 'gallery' }, {}, n)
+  const [filter, setFilter] = useState('all')
+  const [detail, setDetail] = useState(null)
+  const [replyTo, setReplyTo] = useState(null)
+  const [commentLiked, setCommentLiked] = useState({})
+  const shown = (g || []).filter(x => filter === 'all' || x.type === filter)
+  const like = async x => {
+    setDetail(d => d && d.id === x.id ? { ...d, likes: (+d.likes || 0) + 1 } : d)
+    try {
+      const r = await api('engage', { method: 'POST', params: { t: 'gallery', id: x.id, action: 'like' } })
+      setDetail(d => d && d.id === x.id ? { ...d, ...r } : d)
+      setN(v => v + 1)
+    } catch {}
+  }
+  const likeComment = async c => {
+    if (commentLiked[c.id]) return
+    setCommentLiked(s => ({ ...s, [c.id]: true }))
+    setDetail(d => d && d.commentsList ? { ...d, commentsList: d.commentsList.map(x => x.id === c.id ? { ...x, likes: (+x.likes || 0) + 1 } : x) } : d)
+    try {
+      const r = await api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment_like', cid: c.id } })
+      if (r && r.likes != null) setDetail(d => d && d.commentsList ? { ...d, commentsList: d.commentsList.map(x => x.id === c.id ? { ...x, likes: +r.likes } : x) } : d)
+    } catch {
+      setCommentLiked(s => ({ ...s, [c.id]: false }))
+      setDetail(d => d && d.commentsList ? { ...d, commentsList: d.commentsList.map(x => x.id === c.id ? { ...x, likes: Math.max(0, (+x.likes || 1) - 1) } : x) } : d)
+    }
+  }
+  const openItem = x => {
+    setDetail({ ...x, commentsList: null }); setReplyTo(null); setCommentLiked({})
+    api('engage', { method: 'POST', params: { t: 'gallery', id: x.id, action: 'view' } })
+      .then(r => { setDetail(d => d && d.id === x.id ? { ...d, ...r } : d); setN(v => v + 1) }).catch(() => {})
+    api('engage', { params: { t: 'gallery', id: x.id, action: 'comments' } })
+      .then(c => setDetail(d => d && d.id === x.id ? { ...d, commentsList: c } : d))
+      .catch(() => setDetail(d => d && d.id === x.id ? { ...d, commentsList: [] } : d))
+  }
+  const addComment = async (e, parentId = null) => {
+    e.preventDefault(); const f = e.target
+    try {
+      const c = await api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment' }, body: { author_name: f.author_name.value, body: f.body.value, parent_id: parentId } })
+      setDetail(d => ({ ...d, commentsList: c, comments: c.length })); setN(v => v + 1)
+      f.body.value = ''; setReplyTo(null)
+    } catch {}
+  }
+  const itemComments = detail?.commentsList
+  const roots = itemComments ? itemComments.filter(c => !c.parent_id) : []
+  const repliesTo = id => itemComments ? itemComments.filter(c => c.parent_id == id) : []
+  const commentCard = (c, isReply) => <div key={c.id} className={'comment' + (isReply ? ' reply' : '')}>
+    <div className="comment-head"><b>{c.author_name}</b><small>{fmt(c.created_at)}</small></div>
+    <p>{c.body}</p>
+    <div className="comment-actions">
+      <button type="button" className={'icon-btn' + (commentLiked[c.id] ? ' liked' : '')} onClick={() => likeComment(c)}>♥ {+c.likes || 0}</button>
+      {!isReply && <button type="button" className="icon-btn" onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}>Reply</button>}
+    </div>
+  </div>
   return <div className="wrap"><h1>Gallery</h1>
     {g?.length > 0 && <div className="filters">
-      <div>{[['all', 'All'], ['image', 'Photos'], ['video', 'Videos']].map(([v, l]) => <Chip key={v} v={v} cur={type} set={setType}>{l}</Chip>)}</div>
-      </div>}
-    {shown?.length ? <div className="gal">{shown.map(x => <figure key={x.id}>
-      <div className="tile">{x.type === 'video' ? <video src={img(x.file)} controls preload="metadata" /> : <img src={img(x.file)} alt={x.caption || ''} onClick={() => setOpen(x)} />}</div>
-      <figcaption><small>{x.category}</small>{x.caption && <span>{x.caption}</span>}</figcaption></figure>)}</div>
-      : <Empty>{g?.length ? 'Nothing matches those filters.' : 'No photos or videos yet.'}</Empty>}
-    {open && <div className="lightbox" onClick={() => setOpen(null)}><img src={img(open.file)} alt="" /></div>}</div>
+      {GAL_FILTERS.map(([v, l]) => <button key={v} className={'chip' + (filter === v ? ' on' : '')} onClick={() => setFilter(v)}>{l}</button>)}
+    </div>}
+    {shown.length > 0 ? <div className="gal-grid">
+      {shown.map(x => <button type="button" key={x.id} className="gal-card" onClick={() => openItem(x)}>
+        <span className="gal-thumb">
+          {x.type === 'video'
+            ? <><video src={img(x.file)} preload="metadata" muted playsInline /><span className="gal-play">▶</span></>
+            : <img src={img(x.file)} alt={x.caption || 'Gallery photo'} loading="lazy" />}
+        </span>
+        <span className="gal-info">
+          <span className="gal-cap">{x.caption || (x.type === 'video' ? 'Video' : 'Photo')}</span>
+          <span className="gal-meta">♥ {+x.likes || 0} · 👁 {+x.views || 0}{x.comments != null ? ` · 💬 ${+x.comments}` : ''}</span>
+        </span>
+      </button>)}
+    </div> : <Empty>{g?.length ? 'Nothing matches that filter.' : 'No photos or videos yet.'}</Empty>}
+    {detail && <div className="lightbox gal-modal" onClick={() => setDetail(null)}>
+      <div className="gal-modal-inner" onClick={e => e.stopPropagation()}>
+        <button className="hl-close" onClick={() => setDetail(null)}>×</button>
+        {detail.type === 'video'
+          ? <video src={img(detail.file)} controls autoPlay className="gal-modal-media" />
+          : <img src={img(detail.file)} alt={detail.caption || ''} className="gal-modal-media" />}
+        <div className="gal-modal-side">
+          {detail.caption && <p className="gal-cap">{detail.caption}</p>}
+          <div className="actions-row">
+            <StatBar likes={+detail.likes || 0} views={+detail.views || 0} comments={(detail.commentsList?.length ?? (+detail.comments || 0))} onLike={() => like(detail)} />
+            <ShareBtn title={detail.caption || 'Gallery'} text={detail.caption || ''} url={shareLink('#/gallery')} />
+          </div>
+          <h3>Comments</h3>
+          <div className="comments">
+            {!itemComments ? <Empty>Loading…</Empty>
+              : roots.length === 0 ? <Empty>No comments yet.</Empty>
+              : roots.map(c => <div key={c.id} className="comment-thread">
+                {commentCard(c, false)}
+                {repliesTo(c.id).map(r => commentCard(r, true))}
+                {replyTo === c.id && <form className="form comment-form reply-form" onSubmit={e => addComment(e, c.id)}>
+                  <input name="author_name" placeholder="Your name (optional)" />
+                  <textarea name="body" rows="2" placeholder={`Reply to ${c.author_name}...`} required autoFocus />
+                  <div className="actions-row"><button className="btn">Reply</button><button type="button" className="icon-btn" onClick={() => setReplyTo(null)}>Cancel</button></div>
+                </form>}
+              </div>)}
+          </div>
+          <form className="form comment-form" onSubmit={e => addComment(e, null)}>
+            <input name="author_name" placeholder="Your name (optional)" />
+            <textarea name="body" rows="2" placeholder="Add a comment..." required />
+            <button className="btn">Post</button>
+          </form>
+        </div>
+      </div>
+    </div>}
+  </div>
 }
 
 function Register({ refresh }) {
@@ -397,6 +532,33 @@ function Section({ t }) {
     }
     input.click()
   }
+  const editMatch = async r => {
+    if (t !== 'matches') return
+    const opponent = prompt('Opponent', r.opponent || '') ?? r.opponent
+    const match_date = prompt('Date (YYYY-MM-DD)', r.match_date || '') ?? r.match_date
+    const venue = prompt('Venue', r.venue || '') ?? r.venue
+    const home_score = prompt('All Stars goals (leave blank if not played)', r.home_score ?? '') ?? r.home_score
+    const away_score = prompt('Opponent goals (leave blank if not played)', r.away_score ?? '') ?? r.away_score
+    const played = confirm('Mark as played? OK = Yes, Cancel = No')
+    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, opponent, match_date, venue, home_score, away_score, played: played ? 1 : 0, update: 1 } }); setN(n+1) } catch(x){ alert(x.message) }
+  }
+  const editMatchLogo = async r => {
+    if (t !== 'matches') return
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'
+    input.onchange = async () => {
+      const file = input.files?.[0]; if (!file) return
+      try {
+        const s = await api('sign')
+        const fd = new FormData()
+        fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
+        const j = await up.json()
+        if (j.secure_url) { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } }); setN(n+1) }
+      } catch(x){ alert('Failed') }
+    }
+    input.click()
+  }
   const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); setN(n + 1) } }
   const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); setN(n + 1) }
   const multi = t === 'hero_images'
@@ -415,6 +577,8 @@ function Section({ t }) {
         {r.introduced_by && <em className="since"> · introduced by {r.introduced_by}</em>}
         <span className="btns">
         {t === 'matches' && <button className="ok-btn" onClick={() => result(r)}>{+r.played ? 'Edit result' : 'Set result'}</button>}
+        {t === 'matches' && <button onClick={() => editMatch(r)}>Edit</button>}
+        {t === 'matches' && <button onClick={() => editMatchLogo(r)}>Change logo</button>}
         {t === 'players' && <button className={'cert' + (r.certified_on ? ' on' : '')} onClick={() => certify(r)}>{r.certified_on ? 'Revoke' : 'Certify'}</button>}
         {t === 'execos' && <button onClick={() => editExco(r)}>Edit</button>}
         {t === 'execos' && <button onClick={() => editExcoPhoto(r)}>Change photo</button>}
