@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Routes, Route, NavLink, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { api, formData, img, useApi } from './api'
+import { api, formData, img, uploadToCloud, useApi } from './api'
 import { INTRO, GLANCE, JOIN, FINES, RULES } from './clubInfo'
 
-const LOGO = import.meta.env.BASE_URL + 'llg.png'
+const DEFAULT_LOGO = import.meta.env.BASE_URL + 'llg.png'
+const LogoContext = createContext(DEFAULT_LOGO)
+const useLogo = () => useContext(LogoContext)
 const fmt = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const Empty = ({ children }) => <p className="empty">{children}</p>
 const Face = ({ p, cls = '' }) => p.photo ? <img className={cls} src={img(p.photo)} alt={p.name} /> : <div className={'ph ' + cls}>{p.name?.[0]}</div>
@@ -27,13 +29,22 @@ const StatBar = ({ likes = 0, views, comments, liked, onLike, onComment }) => <d
 
 export default function App() {
   const [me, setMe] = useState(undefined); const [open, setOpen] = useState(false); const loc = useLocation()
+  const [brand, setBrand] = useState(null)
+  const loadBrand = () => api('branding').then(setBrand).catch(() => setBrand(null))
+  useEffect(() => {
+    loadBrand()
+    const onBrand = () => loadBrand()
+    window.addEventListener('club-logo-changed', onBrand)
+    return () => window.removeEventListener('club-logo-changed', onBrand)
+  }, [])
+  const logo = brand?.club_logo ? img(brand.club_logo) : DEFAULT_LOGO
   const refresh = () => api('player_me').then(d => setMe(d.player)).catch(() => setMe(null))
   useEffect(() => { refresh() }, [])
   useEffect(() => { setOpen(false); window.scrollTo(0, 0) }, [loc.pathname])
   const links = [['/', 'Home'], ['/news', 'News'], ['/matches', 'Matches'], ['/members', 'Members'], ['/execos', 'Excos'], ['/gallery', 'Gallery'], ['/club', 'The Club'],
     me ? ['/account', 'My profile'] : ['/login', 'Player login'], ...(me ? [] : [['/register', 'Join the team']])]
-  return (<>
-    <header className="top"><Link to="/" className="logo"><img src={import.meta.env.BASE_URL + "llg.png"} alt="" />All Stars FC</Link>
+  return (<LogoContext.Provider value={logo}>
+    <header className="top"><Link to="/" className="logo"><img src={logo} alt="" />All Stars FC</Link>
       <button className="burger" aria-label="Menu" aria-expanded={open} onClick={() => setOpen(!open)}><span /><span /><span /></button>
       <nav className={open ? 'open' : ''}>{links.map(([to, l]) => <NavLink key={to} to={to} end={to === '/'}>{l}</NavLink>)}</nav></header>
     <main><Routes>
@@ -45,7 +56,7 @@ export default function App() {
       <Route path="/admin" element={<Admin />} />
     </Routes></main>
     <footer>All Stars FC · Every Sunday, 4:00pm kick-off · <Link to="/admin">Admin</Link></footer>
-  </>)
+  </LogoContext.Provider>)
 }
 
 function Hero({ slides, mode, next }) {
@@ -113,9 +124,11 @@ function Highlight({ h }) {
 
 function Home() {
   const d = useApi('home')
+  const [range, setRange] = useState('all')
   if (d === null) return <p className="empty">Loading…</p>
   if (!d) return <Empty>Can't reach the server. Start Apache and MySQL in XAMPP.</Empty>
-  const max = Math.max(1, ...d.scorers.map(s => +s.goals))
+  const scorers = (range === 'month' ? d.scorers_month : range === 'year' ? d.scorers_year : d.scorers) || []
+  const max = Math.max(1, ...scorers.map(s => +s.goals))
   return (<>
     <Hero slides={d.hero} mode={d.hero_mode} next={d.next} />
     <div className="wrap tight"><Glance /><p><Link to="/club">Club rules and how to join</Link></p></div>
@@ -130,8 +143,11 @@ function Home() {
       </aside>
     </div>
     <section className="band"><div className="wrap"><h2>Goal chart</h2>
-      {d.scorers.length ? d.scorers.map(s => <Link to={`/player/${s.id}`} key={s.id} className="bar">
-        <span>{s.name}</span><i style={{ width: `${(s.goals / max) * 100}%` }} /><b>{s.goals}</b></Link>) : <Empty>No goals recorded yet.</Empty>}
+      <div className="filters">{[['all', 'Overall'], ['year', 'This year'], ['month', 'This month']].map(([v, l]) =>
+        <button key={v} className={'chip' + (range === v ? ' on' : '')} onClick={() => setRange(v)}>{l}</button>)}</div>
+      {scorers.length ? scorers.map(s => <Link to={`/player/${s.id}`} key={s.id} className="bar">
+        <span>{s.name}</span><i style={{ width: `${(s.goals / max) * 100}%` }} /><b>{s.goals}</b></Link>)
+        : <Empty>{range === 'all' ? 'No goals recorded yet.' : `No goals recorded ${range === 'month' ? 'this month' : 'this year'} yet.`}</Empty>}
     </div></section>
   </>)
 }
@@ -160,10 +176,10 @@ function PotmHome({ p }) {
 }
 
 function NewsBanner({ n }) {
-  const d = new Date(n.created_at)
+  const d = new Date(n.created_at); const logo = useLogo()
   return <article className="nb">
     <div className="sb nb-row">
-      <div className="sb-logo l"><img src={LOGO} alt="" /></div>
+      <div className="sb-logo l"><img src={logo} alt="" /></div>
       <h3 className="sb-team nb-title">{n.title}</h3>
       <div className="sb-mid nb-date"><time>NEWS</time><b><small>{d.toLocaleDateString('en-GB', { month: 'short' })}</small>{d.getDate()}</b></div>
     </div>
@@ -172,12 +188,12 @@ function NewsBanner({ n }) {
 }
 
 function Scoreboard({ m }) {
-  const played = +m.played
+  const played = +m.played; const logo = useLogo()
   const title = `All Stars FC vs ${m.opponent}`
   const text = played ? `${title} ${m.home_score}-${m.away_score} (${fmt(m.match_date)})` : `${title} on ${fmt(m.match_date)}${m.venue ? ' at ' + m.venue : ''}`
   return <article className="match">
     <div className="sb">
-      <div className="sb-logo l"><img src={LOGO} alt="All Stars FC" /></div>
+      <div className="sb-logo l"><img src={logo} alt="All Stars FC" /></div>
       <div className="sb-team">All Stars FC</div>
       <div className="sb-mid"><time>{fmt(m.match_date)}</time><b>{played ? `${m.home_score} - ${m.away_score}` : 'VS'}</b></div>
       <div className="sb-team">{m.opponent}</div>
@@ -449,10 +465,10 @@ function Account({ me, refresh }) {
 const Glance = ({ col }) => <div className={'glance' + (col ? ' col' : '')}>{GLANCE.map(([k, v]) => <div key={k}><small>{k}</small><b>{v}</b></div>)}</div>
 
 function Club() {
-  const [tab, setTab] = useState('about'); const [rule, setRule] = useState(0)
+  const [tab, setTab] = useState('about'); const [rule, setRule] = useState(0); const logo = useLogo()
   return <>
     <section className="club-hero">
-      <img src={import.meta.env.BASE_URL + 'llg.png'} alt="" />
+      <img src={logo} alt="" />
       <div><h1>All Stars FC</h1><p>{INTRO[0]}</p></div>
     </section>
     <div className="subtabs" role="tablist">
@@ -578,7 +594,7 @@ function Section({ t }) {
         <span className="btns">
         {t === 'matches' && <button className="ok-btn" onClick={() => result(r)}>{+r.played ? 'Edit result' : 'Set result'}</button>}
         {t === 'matches' && <button onClick={() => editMatch(r)}>Edit</button>}
-        {t === 'matches' && <button onClick={() => editMatchLogo(r)}>Change logo</button>}
+        {t === 'matches' && <button onClick={() => editMatchLogo(r)}>Change opponent logo</button>}
         {t === 'players' && <button className={'cert' + (r.certified_on ? ' on' : '')} onClick={() => certify(r)}>{r.certified_on ? 'Revoke' : 'Certify'}</button>}
         {t === 'execos' && <button onClick={() => editExco(r)}>Edit</button>}
         {t === 'execos' && <button onClick={() => editExcoPhoto(r)}>Change photo</button>}
@@ -599,6 +615,41 @@ function HeroMode() {
     <small>In static mode the image with the lowest Order number is shown.</small></fieldset>
 }
 
+function ClubLogo() {
+  const [logo, setLogo] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api('branding').then(d => setLogo(d.club_logo || '')).catch(() => setLogo('')) }, [])
+  const pick = () => {
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'
+    input.onchange = async () => {
+      const f = input.files?.[0]; if (!f) return
+      setBusy(true)
+      try {
+        const url = await uploadToCloud(f)
+        await api('branding', { method: 'POST', body: { club_logo: url } })
+        setLogo(url); window.dispatchEvent(new Event('club-logo-changed'))
+      } catch (e) { alert(e.message) } finally { setBusy(false) }
+    }
+    input.click()
+  }
+  const reset = async () => {
+    if (!confirm('Reset to the default club logo?')) return
+    try { await api('branding', { method: 'POST', body: { club_logo: '' } }); setLogo(''); window.dispatchEvent(new Event('club-logo-changed')) } catch (e) { alert(e.message) }
+  }
+  if (logo === null) return null
+  return <fieldset className="mode"><legend>Club logo</legend>
+    <div className="logo-admin">
+      <img src={logo ? img(logo) : DEFAULT_LOGO} alt="Club logo" />
+      <div className="actions-row">
+        <button type="button" className="btn" disabled={busy} onClick={pick}>{busy ? 'Uploading…' : 'Change logo'}</button>
+        {logo && <button type="button" className="icon-btn" onClick={reset}>Reset to default</button>}
+      </div>
+    </div>
+    <small>Shown in the header, news banners, club page and next to All Stars FC on the matches page.</small>
+  </fieldset>
+}
+
 function Admin() {
   const [auth, setAuth] = useState(null); const [err, setErr] = useState(''); const [tab, setTab] = useState('hero_images')
   useEffect(() => { api('me').then(d => setAuth(d.admin)) }, [])
@@ -610,5 +661,5 @@ function Admin() {
   return <div className="wrap"><h1>Admin</h1>
     <div className="tabs">{Object.entries(SECTIONS).map(([k, [l]]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
       <button onClick={async () => { await api('logout'); setAuth(false) }}>Log out</button></div>
-        {tab === 'hero_images' && <HeroMode />}<Section key={tab} t={tab} /></div>
+        {tab === 'hero_images' && <HeroMode />}{tab === 'matches' && <ClubLogo />}<Section key={tab} t={tab} /></div>
 }

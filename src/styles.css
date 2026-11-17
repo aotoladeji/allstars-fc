@@ -55,6 +55,10 @@ footer{text-align:center;padding:28px;color:#4f6478;font-size:.9rem}
 .potm-note{background:#fff;padding:12px 16px}
 .potm-note p{margin:0;white-space:pre-wrap}
 .band{background:var(--ink);color:#fff}.band h2{margin-top:0}.band small{color:#cfe0fb}
+.band .filters{margin:0 0 16px}
+.band .chip{border-color:rgba(255,255,255,.5);background:transparent;color:#fff}
+.band .chip:hover{background:rgba(255,255,255,.12)}
+.band .chip.on{background:#fff;color:var(--ink)}
 .bar{display:grid;grid-template-columns:150px 1fr 36px;gap:12px;align-items:center;text-decoration:none;padding:5px 0}
 .bar i{display:block;height:20px;background:var(--kit);min-width:4px;border-radius:0 3px 3px 0}.bar b{text-align:right}
 
@@ -168,6 +172,9 @@ input:disabled{background:#e4ebf5;color:#4f6478}
 .tabs button{padding:8px 14px;border:1px solid var(--ink);background:#fff;cursor:pointer;border-radius:4px;color:var(--ink)}.tabs .on{background:var(--ink);color:#fff}
 .mode{border:1px solid var(--line);background:#fff;padding:12px 16px;margin:0 0 24px;display:grid;gap:8px}
 .mode label{display:flex;gap:10px;align-items:center}.mode input{width:auto}
+.logo-admin{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.logo-admin img{width:64px;height:64px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px}
+.logo-admin .actions-row{margin-top:0}
 .rows{list-style:none;padding:0}.rows li{display:flex;justify-content:space-between;gap:12px;background:#fff;padding:10px 14px;margin-bottom:6px}
 .rows button{border:0;background:none;color:#b3261e;cursor:pointer;font-weight:700}
 .rows .btns{display:flex;gap:14px;flex:none}.rows .since{color:var(--grass);font-style:normal;font-size:.85rem}

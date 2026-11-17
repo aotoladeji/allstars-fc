@@ -88,7 +88,7 @@ const LISTS = {
   highlights: 'SELECT * FROM highlights ORDER BY sort_order,id DESC',
   execos: 'SELECT * FROM execos ORDER BY sort_order,id',
 }
-const SCORERS = 'SELECT p.id,p.name,p.photo,SUM(g.qty) goals FROM goals g JOIN players p ON p.id=g.player_id GROUP BY p.id ORDER BY goals DESC LIMIT 10'
+const scorersSql = w => `SELECT p.id,p.name,p.photo,SUM(g.qty) goals FROM goals g JOIN players p ON p.id=g.player_id LEFT JOIN matches m ON m.id=g.match_id ${w} GROUP BY p.id ORDER BY goals DESC LIMIT 10`
 const PCOLS = ['name', 'position', 'shirt_no', 'bio', 'nationality', 'dob', 'height', 'weight', 'foot', 'alt_position', 'state_origin', 'state_residence', 'current_club', 'career', 'phone', 'contact_email', 'emergency_contact']
 const CFG = {
   news: { cols: ['title', 'body'] },
@@ -132,12 +132,13 @@ async function route(req, res, out) {
 
   switch (r) {
     case 'home': {
-      const [hero, news, potm, scorers, next, hm] = await Promise.all([
-        q(LISTS.hero_images).catch(()=>[]), q('SELECT * FROM news ORDER BY created_at DESC LIMIT 3').catch(()=>[]), q((LISTS.potm||'SELECT * FROM potm') + ' LIMIT 1').catch(()=>[]), q(SCORERS).catch(()=>[]),
+      const [hero, news, potm, scorers, scorersYear, scorersMonth, next, hm] = await Promise.all([
+        q(LISTS.hero_images).catch(()=>[]), q('SELECT * FROM news ORDER BY created_at DESC LIMIT 3').catch(()=>[]), q((LISTS.potm||'SELECT * FROM potm') + ' LIMIT 1').catch(()=>[]), q(scorersSql('')).catch(()=>[]),
+        q(scorersSql('WHERE YEAR(m.match_date)=YEAR(CURDATE())')).catch(()=>[]), q(scorersSql('WHERE YEAR(m.match_date)=YEAR(CURDATE()) AND MONTH(m.match_date)=MONTH(CURDATE())')).catch(()=>[]),
         q('SELECT * FROM matches WHERE played=0 AND match_date>=CURDATE() ORDER BY match_date LIMIT 1').catch(()=>[]), q("SELECT v FROM settings WHERE k='hero_mode'").catch(()=>[])])
       let highlights=[]
       try{ highlights = await q('SELECT * FROM highlights WHERE active=1 ORDER BY sort_order,id DESC LIMIT 1') }catch{}
-      return out({ hero, news, potm: potm[0] || null, scorers, next: next[0] || null, hero_mode: hm[0]?.v || 'scroll', highlight: highlights[0] || null })
+      return out({ hero, news, potm: potm[0] || null, scorers, scorers_year: scorersYear, scorers_month: scorersMonth, next: next[0] || null, hero_mode: hm[0]?.v || 'scroll', highlight: highlights[0] || null })
     }
     case 'list': {
       if (!LISTS[t]) return out({ error: 'Unknown list' }, 404)
@@ -243,6 +244,19 @@ async function route(req, res, out) {
         await q("REPLACE INTO settings(k,v) VALUES('hero_mode',?)", [b.mode === 'static' ? 'static' : 'scroll'])
       }
       return out({ mode: (await one("SELECT v FROM settings WHERE k='hero_mode'"))?.v || 'scroll' })
+    case 'branding': { // the club's own logo, shown in the header and next to All Stars FC
+      if (m === 'POST') {
+        if (!S.admin) return out({ error: 'Please log in.' }, 401)
+        if (b.club_logo !== undefined) {
+          if (!b.club_logo) await q("DELETE FROM settings WHERE k='club_logo'")
+          else {
+            if (!okUrl(b.club_logo)) return out({ error: 'Bad image link.' }, 400)
+            await q("REPLACE INTO settings(k,v) VALUES('club_logo',?)", [b.club_logo])
+          }
+        }
+      }
+      return out({ club_logo: (await one("SELECT v FROM settings WHERE k='club_logo'"))?.v || null })
+    }
     case 'admin_players':
       if (!S.admin) return out({ error: 'Please log in.' }, 401)
       return out(await q('SELECT id,name,email,position,introduced_by,certified_on,created_at FROM players ORDER BY created_at DESC'))
