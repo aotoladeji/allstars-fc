@@ -579,14 +579,8 @@ function Section({ t }) {
     try { await run(() => api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }), 'Changes saved.'); changed() } catch {}
   }
   const uploadPhoto = async r => {
-    const s = await api('sign')
-    const fd = new FormData()
-    fd.append('file', r.file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
-    const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
-    const j = await up.json()
-    if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
-    if (!j.secure_url) throw new Error('Upload failed')
-    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
+    const url = await uploadToCloud(r.file)
+    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: url, update: 1 } })
   }
   const pickPhoto = async (row, success) => {
     const input = document.createElement('input')

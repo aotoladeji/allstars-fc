@@ -64,12 +64,17 @@ export function useApi(r, params = {}, dep = 0) {
 export async function uploadToCloud(file, resource) {
   resource = resource || (file.type.startsWith('video') ? 'video' : 'image')
   const s = await api('sign', { params: { resource } })
+  if (!s.cloud_name || !s.api_key || !s.signature || s.timestamp == null || !s.folder) throw new Error('Cloudinary is not configured on the server. Check its environment variables.')
   const fd = new FormData()
   fd.append('file', file)
-  ;['api_key', 'timestamp', 'signature', 'folder', 'allowed_formats'].forEach(k => fd.append(k, s[k]))
+  ;['api_key', 'timestamp', 'signature', 'folder', 'allowed_formats'].forEach(k => { if (s[k] != null) fd.append(k, s[k]) })
   const r = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/${resource}/upload`, { method: 'POST', body: fd })
-  const d = await r.json()
-  if (!r.ok) throw new Error(d.error?.message || 'Upload failed')
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const reason = d.error?.message || (r.status === 401 ? 'Invalid signature or API key.' : `Upload failed (${r.status}).`)
+    throw new Error(r.status === 401 ? `Cloudinary rejected the upload (401): ${reason} Check CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET on the server.` : reason)
+  }
+  if (!d.secure_url) throw new Error('Cloudinary did not return an image link.')
   return d.secure_url
 }
 
