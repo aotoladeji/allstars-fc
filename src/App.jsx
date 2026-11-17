@@ -117,9 +117,10 @@ function Highlight({ h }) {
   const [open, setOpen] = useState(false)
   const [st, setSt] = useState(null)
   const [liked, setLiked] = useState(false)
+  const [busy, run] = useBusyAction()
   useEffect(() => { if (h) { setSt({ likes: +h.likes || 0, views: +h.views || 0 }); setLiked(false); api('engage', { method: 'POST', params: { t: 'highlights', id: h.id, action: 'view' } }).then(d => d && setSt(s => ({ ...s, ...d }))).catch(()=>{}) } }, [h?.id])
   if (!h) return null
-  const like = async () => { if (liked) return; setLiked(true); try { const d = await api('engage', { method: 'POST', params: { t: 'highlights', id: h.id, action: 'like' } }); setSt(s => ({ ...s, ...d })) } catch {} }
+  const like = async () => { if (liked || busy) return; try { const d = await run(() => api('engage', { method: 'POST', params: { t: 'highlights', id: h.id, action: 'like' } }), 'Like added.'); setSt(s => ({ ...s, ...d })); setLiked(true) } catch {} }
   const shareUrl = shareLink('#/')
   return <>
     <section className="highlight">
@@ -132,7 +133,7 @@ function Highlight({ h }) {
             {h.subtitle && <h3>{h.subtitle}</h3>}
             {h.body && <p className="hl-body">{h.body.length > 180 ? h.body.slice(0, 177) + '...' : h.body}</p>}
             <div className="actions-row">
-              <StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} onLike={like} />
+              <StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} busy={busy} onLike={like} />
               <ShareBtn title={h.title || 'Highlight'} text={h.subtitle || h.title || 'Check this out'} url={shareUrl} />
               {(h.body || h.subtitle) ? <button className="hl-read" onClick={() => setOpen(true)}>View</button> : null}
             </div>
@@ -149,7 +150,7 @@ function Highlight({ h }) {
           {h.title && <h2>{h.title}</h2>}
           {h.subtitle && <h3>{h.subtitle}</h3>}
           {h.body && <p>{h.body}</p>}
-          <div className="actions-row"><StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} onLike={like} /><ShareBtn title={h.title || 'Highlight'} text={h.subtitle || h.title || ''} url={shareUrl} /></div>
+          <div className="actions-row"><StatBar likes={st?.likes ?? 0} views={st?.views ?? 0} liked={liked} busy={busy} onLike={like} /><ShareBtn title={h.title || 'Highlight'} text={h.subtitle || h.title || ''} url={shareUrl} /></div>
         </div>
       </div>
     </div>}
@@ -189,8 +190,9 @@ function Home() {
 function PotmHome({ p }) {
   const [st, setSt] = useState({ likes: +p.likes || 0, views: +p.views || 0 })
   const [liked, setLiked] = useState(false)
+  const [busy, run] = useBusyAction()
   useEffect(() => { setSt({ likes: +p.likes || 0, views: +p.views || 0 }); setLiked(false); api('engage', { method: 'POST', params: { t: 'potm', id: p.id, action: 'view' } }).then(d => d && setSt(s => ({ ...s, ...d }))).catch(()=>{}) }, [p.id])
-  const like = async () => { if (liked) return; setLiked(true); try { const d = await api('engage', { method: 'POST', params: { t: 'potm', id: p.id, action: 'like' } }); setSt(s => ({ ...s, ...d })) } catch {} }
+  const like = async () => { if (liked || busy) return; try { const d = await run(() => api('engage', { method: 'POST', params: { t: 'potm', id: p.id, action: 'like' } }), 'Like added.'); setSt(s => ({ ...s, ...d })); setLiked(true) } catch {} }
   return <div className="potm-card">
     <Link to={`/player/${p.player_id}`} className="potm-bg" style={(p.potm_image || p.photo) ? { backgroundImage: `url(${img(p.potm_image || p.photo)})` } : {}}>
       <div className="potm-overlay">
@@ -203,7 +205,7 @@ function PotmHome({ p }) {
     </Link>
     {p.note && <div className="potm-note"><p>{p.note}</p></div>}
     <div className="potm-actions actions-row">
-      <StatBar likes={st.likes} views={st.views} liked={liked} onLike={like} />
+      <StatBar likes={st.likes} views={st.views} liked={liked} busy={busy} onLike={like} />
       <ShareBtn title={`Player of the Month: ${p.name}`} text={`${p.name} is Player of the Month (${p.month})`} url={shareLink(`#/player/${p.player_id}`)} />
     </div>
   </div>
@@ -312,21 +314,23 @@ function Gallery() {
   const [detail, setDetail] = useState(null)
   const [replyTo, setReplyTo] = useState(null)
   const [commentLiked, setCommentLiked] = useState({})
+  const [busy, run] = useBusyAction()
   const shown = (g || []).filter(x => filter === 'all' || x.type === filter)
   const like = async x => {
+    if (busy) return
     setDetail(d => d && d.id === x.id ? { ...d, likes: (+d.likes || 0) + 1 } : d)
     try {
-      const r = await api('engage', { method: 'POST', params: { t: 'gallery', id: x.id, action: 'like' } })
+      const r = await run(() => api('engage', { method: 'POST', params: { t: 'gallery', id: x.id, action: 'like' } }), 'Like added.')
       setDetail(d => d && d.id === x.id ? { ...d, ...r } : d)
       setN(v => v + 1)
     } catch {}
   }
   const likeComment = async c => {
-    if (commentLiked[c.id]) return
+    if (commentLiked[c.id] || busy) return
     setCommentLiked(s => ({ ...s, [c.id]: true }))
     setDetail(d => d && d.commentsList ? { ...d, commentsList: d.commentsList.map(x => x.id === c.id ? { ...x, likes: (+x.likes || 0) + 1 } : x) } : d)
     try {
-      const r = await api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment_like', cid: c.id } })
+      const r = await run(() => api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment_like', cid: c.id } }), 'Like added.')
       if (r && r.likes != null) setDetail(d => d && d.commentsList ? { ...d, commentsList: d.commentsList.map(x => x.id === c.id ? { ...x, likes: +r.likes } : x) } : d)
     } catch {
       setCommentLiked(s => ({ ...s, [c.id]: false }))
@@ -342,9 +346,9 @@ function Gallery() {
       .catch(() => setDetail(d => d && d.id === x.id ? { ...d, commentsList: [] } : d))
   }
   const addComment = async (e, parentId = null) => {
-    e.preventDefault(); const f = e.target
+    e.preventDefault(); const f = e.target; if (busy) return
     try {
-      const c = await api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment' }, body: { author_name: f.author_name.value, body: f.body.value, parent_id: parentId } })
+      const c = await run(() => api('engage', { method: 'POST', params: { t: 'gallery', id: detail.id, action: 'comment' }, body: { author_name: f.author_name.value, body: f.body.value, parent_id: parentId } }), parentId ? 'Reply posted.' : 'Comment posted.')
       setDetail(d => ({ ...d, commentsList: c, comments: c.length })); setN(v => v + 1)
       f.body.value = ''; setReplyTo(null)
     } catch {}
@@ -356,8 +360,8 @@ function Gallery() {
     <div className="comment-head"><b>{c.author_name}</b><small>{fmt(c.created_at)}</small></div>
     <p>{c.body}</p>
     <div className="comment-actions">
-      <button type="button" className={'icon-btn' + (commentLiked[c.id] ? ' liked' : '')} onClick={() => likeComment(c)}>♥ {+c.likes || 0}</button>
-      {!isReply && <button type="button" className="icon-btn" onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}>Reply</button>}
+      <button type="button" className={'icon-btn' + (commentLiked[c.id] ? ' liked' : '')} disabled={busy} onClick={() => likeComment(c)}>{busy && <Spin />}♥ {+c.likes || 0}</button>
+      {!isReply && <button type="button" className="icon-btn" disabled={busy} onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}>Reply</button>}
     </div>
   </div>
   return <div className="wrap"><h1>Gallery</h1>
@@ -386,7 +390,7 @@ function Gallery() {
         <div className="gal-modal-side">
           {detail.caption && <p className="gal-cap">{detail.caption}</p>}
           <div className="actions-row">
-            <StatBar likes={+detail.likes || 0} views={+detail.views || 0} comments={(detail.commentsList?.length ?? (+detail.comments || 0))} onLike={() => like(detail)} />
+            <StatBar likes={+detail.likes || 0} views={+detail.views || 0} comments={(detail.commentsList?.length ?? (+detail.comments || 0))} busy={busy} onLike={() => like(detail)} />
             <ShareBtn title={detail.caption || 'Gallery'} text={detail.caption || ''} url={shareLink('#/gallery')} />
           </div>
           <h3>Comments</h3>
@@ -399,14 +403,14 @@ function Gallery() {
                 {replyTo === c.id && <form className="form comment-form reply-form" onSubmit={e => addComment(e, c.id)}>
                   <input name="author_name" placeholder="Your name (optional)" />
                   <textarea name="body" rows="2" placeholder={`Reply to ${c.author_name}...`} required autoFocus />
-                  <div className="actions-row"><button className="btn">Reply</button><button type="button" className="icon-btn" onClick={() => setReplyTo(null)}>Cancel</button></div>
+                  <div className="actions-row"><button className="btn" disabled={busy}>{busy && <Spin />}Reply</button><button type="button" className="icon-btn" disabled={busy} onClick={() => setReplyTo(null)}>Cancel</button></div>
                 </form>}
               </div>)}
           </div>
           <form className="form comment-form" onSubmit={e => addComment(e, null)}>
             <input name="author_name" placeholder="Your name (optional)" />
             <textarea name="body" rows="2" placeholder="Add a comment..." required />
-            <button className="btn">Post</button>
+            <button className="btn" disabled={busy}>{busy && <Spin />}Post</button>
           </form>
         </div>
       </div>
@@ -415,10 +419,13 @@ function Gallery() {
 }
 
 function Register({ refresh }) {
-  const nav = useNavigate(); const [err, setErr] = useState('')
+  const nav = useNavigate(); const [err, setErr] = useState(''); const [busy, run] = useBusyAction()
   const submit = async e => {
     e.preventDefault(); setErr('')
-      try { await api('register', { method: 'POST', body: await formData(e.target, true) }); await refresh(); nav('/account') } catch (x) { setErr(x.message) }
+    try {
+      await run(async () => { await api('register', { method: 'POST', body: await formData(e.target, true) }); await refresh() }, 'Profile created. Welcome to the team!')
+      nav('/account')
+    } catch (x) { setErr(x.message) }
   }
   return <div className="wrap narrow"><h1>Join the squad</h1>
       <p>Your profile goes live straight away. Full membership needs the ₦10,000 joining fee and the executives’ approval. After that, the admin certifies you.</p>
@@ -432,22 +439,25 @@ function Register({ refresh }) {
       <label>About you<textarea name="bio" rows="4" placeholder="Strengths, favourite club, one fun fact" /></label>
       <label>Photo<input name="photo" type="file" accept="image/*" /></label>
       <label className="agree"><input type="checkbox" required /> I have read the <Link to="/club">club rules</Link> and agree to follow them.</label>
-      {err && <p className="err">{err}</p>}<button className="btn">Create my profile</button></form></div>
+      {err && <p className="err">{err}</p>}<button className="btn" disabled={busy}>{busy && <Spin />}{busy ? 'Creating profile…' : 'Create my profile'}</button></form></div>
 }
 
 const CATS = ['Match Day', 'Training', 'Social', 'Awards', 'General']
 
 function Login({ refresh }) {
-  const nav = useNavigate(); const [err, setErr] = useState('')
+  const nav = useNavigate(); const [err, setErr] = useState(''); const [busy, run] = useBusyAction()
   const submit = async e => {
     e.preventDefault(); setErr('')
-    try { await api('player_login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); await refresh(); nav('/account') } catch (x) { setErr(x.message) }
+    try {
+      await run(async () => { await api('player_login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); await refresh() }, 'Logged in successfully.')
+      nav('/account')
+    } catch (x) { setErr(x.message) }
   }
   return <div className="wrap narrow"><h1>Player login</h1>
     <form className="form" onSubmit={submit}>
       <label>Email<input name="email" type="email" required /></label>
       <label>Password<input name="password" type="password" required /></label>
-      {err && <p className="err">{err}</p>}<button className="btn">Log in</button></form>
+      {err && <p className="err">{err}</p>}<button className="btn" disabled={busy}>{busy && <Spin />}{busy ? 'Logging in…' : 'Log in'}</button></form>
     <p>Not a member yet? <Link to="/register">Join the team</Link>.</p></div>
 }
 
@@ -456,19 +466,21 @@ const MORE = [['nationality', 'Nationality'], ['dob', 'Date of birth', 'date'], 
   ['current_club', 'Current club'], ['phone', 'Phone (shown publicly, optional)', 'tel'], ['contact_email', 'Contact email (shown publicly, optional)', 'email'], ['emergency_contact', 'Emergency contact']]
 
 function Account({ me, refresh }) {
-  const nav = useNavigate(); const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [prev, setPrev] = useState('')
+  const nav = useNavigate(); const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [prev, setPrev] = useState(''); const [busy, run] = useBusyAction()
   if (me === undefined) return null
   if (!me) return <div className="wrap narrow"><Empty>Please <Link to="/login">log in</Link> to edit your profile.</Empty></div>
   const save = async e => {
-    e.preventDefault(); setMsg(''); setErr('')
+    e.preventDefault(); setMsg(''); setErr(''); if (busy) return
     const f = e.target
     try {
-      await api('player_update', { method: 'POST', body: await formData(f) })
-      await refresh(); setPrev(''); ['photo', 'photo2', 'photo3', 'current_password', 'new_password'].forEach(k => f[k].value = '')
+      await run(async () => {
+        await api('player_update', { method: 'POST', body: await formData(f) })
+        await refresh(); setPrev(''); ['photo', 'photo2', 'photo3', 'current_password', 'new_password'].forEach(k => f[k].value = '')
+      }, 'Profile saved. Your changes are now live.')
       setMsg('Saved. Your changes are now live on your public profile and the Members page.')
     } catch (x) { setErr(x.message) }
   }
-  const logout = async () => { await api('player_logout'); await refresh(); nav('/') }
+  const logout = async () => { if (busy) return; try { await run(async () => { await api('player_logout'); await refresh() }, 'Logged out.'); nav('/') } catch {} }
   const field = ([k, l, ty]) => <label key={k}>{l}{ty === 'foot'
     ? <select name={k} defaultValue={me[k] || ''}><option value="">Not set</option>{['Left', 'Right', 'Both'].map(x => <option key={x}>{x}</option>)}</select>
     : <input name={k} type={ty || 'text'} defaultValue={me[k] ?? ''} />}</label>
@@ -491,8 +503,8 @@ function Account({ me, refresh }) {
         <label>Current password<input name="current_password" type="password" autoComplete="current-password" /></label>
         <label>New password<input name="new_password" type="password" minLength="6" autoComplete="new-password" /></label></fieldset>
       {err && <p className="err">{err}</p>}{msg && <p className="ok">{msg}</p>}
-      <div className="actions"><button className="btn">Save changes</button><Link to={`/player/${me.id}`}>View my public profile</Link>
-        <button type="button" className="link" onClick={logout}>Log out</button></div>
+      <div className="actions"><button className="btn" disabled={busy}>{busy && <Spin />}{busy ? 'Saving…' : 'Save changes'}</button><Link to={`/player/${me.id}`}>View my public profile</Link>
+        <button type="button" className="link" disabled={busy} onClick={logout}>{busy && <Spin />}{busy ? 'Logging out…' : 'Log out'}</button></div>
     </form></div>
 }
 
@@ -543,83 +555,62 @@ const SECTIONS = {
 }
 
 function Section({ t }) {
-  const [label, fields] = SECTIONS[t]; const [n, setN] = useState(0); const [err, setErr] = useState('')
+  const [label, fields] = SECTIONS[t]; const [n, setN] = useState(0); const [err, setErr] = useState(''); const [busy, run] = useBusyAction()
   const rows = useApi(t === 'players' ? 'admin_players' : 'list', { t }, n); const players = useApi('list', { t: 'players' })
     const ms = useApi('list', { t: 'matches' }, n)
   const changed = () => { setN(x => x + 1); notifyDataChanged() }
   const result = async r => {
     const a = prompt(`All Stars goals vs ${r.opponent}?`, r.home_score ?? 0); if (a === null) return
     const b = prompt(`${r.opponent} goals?`, r.away_score ?? 0); if (b === null) return
-    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, home_score: a, away_score: b } }); changed()
+    try { await run(() => api('admin', { method: 'POST', params: { t }, body: { id: r.id, home_score: a, away_score: b } }), 'Result saved.'); changed() } catch {}
   }
-  const add = async e => { e.preventDefault(); setErr('')
+  const add = async e => { e.preventDefault(); setErr(''); if (busy) return
     try {
       const b = await formData(e.target)
-      await api('admin', { method: 'POST', params: { t }, body: b })
+      await run(() => api('admin', { method: 'POST', params: { t }, body: b }), 'Added successfully.')
       e.target.reset(); changed()
     } catch (x) { setErr(x.message) } }
   const editExco = async r => {
-    if (t !== 'execos') return
+    if (t !== 'execos' || busy) return
     const name = prompt('Name', r.name || '') ?? r.name
     const position = prompt('Position', r.position || '') ?? r.position
     const bio = prompt('Bio', r.bio || '') ?? r.bio
     const sort_order = prompt('Order', r.sort_order ?? 0) ?? r.sort_order
-    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }); changed() } catch(x){ alert(x.message) }
+    try { await run(() => api('admin', { method: 'POST', params: { t }, body: { id: r.id, name, position, bio, sort_order, update: 1 } }), 'Changes saved.'); changed() } catch {}
   }
-  const editExcoPhoto = async r => {
-    if (t !== 'execos') return
+  const uploadPhoto = async r => {
+    const s = await api('sign')
+    const fd = new FormData()
+    fd.append('file', r.file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
+    const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
+    const j = await up.json()
+    if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
+    if (!j.secure_url) throw new Error('Upload failed')
+    await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
+  }
+  const pickPhoto = async (row, success) => {
     const input = document.createElement('input')
     input.type = 'file'; input.accept = 'image/*'
     input.onchange = async () => {
       const file = input.files?.[0]; if (!file) return
-      try {
-        const s = await api('sign')
-        const fd = new FormData()
-        fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
-        const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
-        const j = await up.json()
-        if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
-        if (!j.secure_url) throw new Error('Upload failed')
-        await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
-        changed()
-        alert('Photo updated.')
-      } catch(x){ alert(x.message || 'Failed') }
+      try { await run(() => uploadPhoto({ ...row, file }), success); changed() } catch {}
     }
     input.click()
   }
+  const editExcoPhoto = r => { if (t === 'execos' && !busy) pickPhoto(r, 'Photo updated.') }
   const editMatch = async r => {
-    if (t !== 'matches') return
+    if (t !== 'matches' || busy) return
     const opponent = prompt('Opponent', r.opponent || '') ?? r.opponent
     const match_date = prompt('Date (YYYY-MM-DD)', r.match_date || '') ?? r.match_date
     const venue = prompt('Venue', r.venue || '') ?? r.venue
     const home_score = prompt('All Stars goals (leave blank if not played)', r.home_score ?? '') ?? r.home_score
     const away_score = prompt('Opponent goals (leave blank if not played)', r.away_score ?? '') ?? r.away_score
     const played = confirm('Mark as played? OK = Yes, Cancel = No')
-    try { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, opponent, match_date, venue, home_score, away_score, played: played ? 1 : 0, update: 1 } }); changed() } catch(x){ alert(x.message) }
+    try { await run(() => api('admin', { method: 'POST', params: { t }, body: { id: r.id, opponent, match_date, venue, home_score, away_score, played: played ? 1 : 0, update: 1 } }), 'Match updated.'); changed() } catch {}
   }
-  const editMatchLogo = async r => {
-    if (t !== 'matches') return
-    const input = document.createElement('input')
-    input.type = 'file'; input.accept = 'image/*'
-    input.onchange = async () => {
-      const file = input.files?.[0]; if (!file) return
-      try {
-        const s = await api('sign')
-        const fd = new FormData()
-        fd.append('file', file); fd.append('api_key', s.api_key); fd.append('timestamp', s.timestamp); fd.append('signature', s.signature); fd.append('folder', 'allstars')
-        const up = await fetch(`https://api.cloudinary.com/v1_1/${s.cloud_name}/image/upload`, { method: 'POST', body: fd })
-        const j = await up.json()
-        if (!up.ok) throw new Error(j.error?.message || 'Upload failed')
-        if (!j.secure_url) throw new Error('Upload failed')
-        await api('admin', { method: 'POST', params: { t }, body: { id: r.id, file: j.secure_url, update: 1 } })
-        changed()
-        alert('Opponent logo updated.')
-      } catch(x){ alert(x.message || 'Failed') }
-    }
-    input.click()
-  }
-  const del = async id => { if (confirm('Delete this?')) { await api('admin', { method: 'DELETE', params: { t, id } }); changed() } }
-  const certify = async r => { await api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }); changed() }
+  const editMatchLogo = r => { if (t === 'matches' && !busy) pickPhoto(r, 'Opponent logo updated.') }
+  const del = async id => { if (confirm('Delete this?') && !busy) { try { await run(() => api('admin', { method: 'DELETE', params: { t, id } }), 'Deleted.'); changed() } catch {} } }
+  const certify = async r => { if (busy) return; try { await run(() => api('admin', { method: 'POST', params: { t }, body: { id: r.id, certify: r.certified_on ? 0 : 1 } }), r.certified_on ? 'Certification revoked.' : 'Member certified.'); changed() } catch {} }
   const multi = t === 'hero_images'
      const input = ([k, l, ty]) => <label key={k}>{l}{ty === 'textarea' ? <textarea name={k} rows="4" />
     : ty === 'player' ? <select name={k} required>{players?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -629,19 +620,19 @@ function Section({ t }) {
     : ty === 'file' ? <input name={multi ? 'file[]' : 'file'} type="file" multiple={multi} required={t !== 'matches' && t !== 'potm'} accept={t === 'gallery' ? 'image/*,video/mp4,video/webm' : 'image/*'} />
     : <input name={k} type={ty || 'text'} required={['title', 'opponent', 'match_date', 'month'].includes(k) && t !== 'highlights' && t !== 'potm' ? true : (['name','position'].includes(k))} />}</label>
   return (<div><h2>{label}</h2>
-    {fields.length > 0 && <form className="form" onSubmit={add}>{fields.map(input)}{err && <p className="err">{err}</p>}<button className="btn">{multi ? 'Upload' : 'Add'}</button></form>}
+    {fields.length > 0 && <form className="form" onSubmit={add}>{fields.map(input)}{err && <p className="err">{err}</p>}<button className="btn" disabled={busy}>{busy && <Spin />}{busy ? (multi ? 'Uploading…' : 'Adding…') : (multi ? 'Upload' : 'Add')}</button></form>}
         <ul className="rows">{rows?.map(r => <li key={r.id}>
       <span>{(r.image||r.photo||r.opponent_logo) && <img className="thumb" src={img(r.image||r.photo||r.opponent_logo)} alt="" />}{[r.title, r.opponent, r.name, r.position, r.month, r.caption, r.qty && `x${r.qty}`].filter(Boolean).join(' · ') || `#${r.id}`}
         {r.certified_on && <em className="since"> ✓ certified {fmt(r.certified_on)}</em>}</span>
         {r.introduced_by && <em className="since"> · introduced by {r.introduced_by}</em>}
         <span className="btns">
-        {t === 'matches' && <button className="ok-btn" onClick={() => result(r)}>{+r.played ? 'Edit result' : 'Set result'}</button>}
-        {t === 'matches' && <button onClick={() => editMatch(r)}>Edit</button>}
-        {t === 'matches' && <button onClick={() => editMatchLogo(r)}>Change opponent logo</button>}
-        {t === 'players' && <button className={'cert' + (r.certified_on ? ' on' : '')} onClick={() => certify(r)}>{r.certified_on ? 'Revoke' : 'Certify'}</button>}
-        {t === 'execos' && <button onClick={() => editExco(r)}>Edit</button>}
-        {t === 'execos' && <button onClick={() => editExcoPhoto(r)}>Change photo</button>}
-        <button onClick={() => del(r.id)}>Delete</button></span>
+        {t === 'matches' && <button className="ok-btn" disabled={busy} onClick={() => result(r)}>{busy && <Spin />}{+r.played ? 'Edit result' : 'Set result'}</button>}
+        {t === 'matches' && <button disabled={busy} onClick={() => editMatch(r)}>{busy && <Spin />}Edit</button>}
+        {t === 'matches' && <button disabled={busy} onClick={() => editMatchLogo(r)}>{busy && <Spin />}Change opponent logo</button>}
+        {t === 'players' && <button className={'cert' + (r.certified_on ? ' on' : '')} disabled={busy} onClick={() => certify(r)}>{busy && <Spin />}{r.certified_on ? 'Revoke' : 'Certify'}</button>}
+        {t === 'execos' && <button disabled={busy} onClick={() => editExco(r)}>{busy && <Spin />}Edit</button>}
+        {t === 'execos' && <button disabled={busy} onClick={() => editExcoPhoto(r)}>{busy && <Spin />}Change photo</button>}
+        <button disabled={busy} onClick={() => del(r.id)}>{busy && <Spin />}Delete</button></span>
         </li>)}
         </ul>
         </div>)
@@ -649,44 +640,53 @@ function Section({ t }) {
 
 function HeroMode() {
   const [mode, setMode] = useState(null)
+  const [busy, run] = useBusyAction()
   useEffect(() => { api('hero_mode').then(d => setMode(d.mode)) }, [])
-  const set = async m => { setMode(m); await api('hero_mode', { method: 'POST', body: { mode: m } }) }
+  const set = async m => {
+    if (busy || m === mode) return
+    const old = mode; setMode(m)
+    try { await run(() => api('hero_mode', { method: 'POST', body: { mode: m } }), 'Hero style updated.') } catch { setMode(old) }
+  }
   if (!mode) return null
   return <fieldset className="mode"><legend>Hero style</legend>
     {[['scroll', 'Scrollable slideshow (all hero images)'], ['static', 'Static (first image only)']].map(([v, l]) =>
-      <label key={v}><input type="radio" name="mode" checked={mode === v} onChange={() => set(v)} />{l}</label>)}
+      <label key={v}><input type="radio" name="mode" checked={mode === v} disabled={busy} onChange={() => set(v)} />{busy && <Spin />}{l}</label>)}
     <small>In static mode the image with the lowest Order number is shown.</small></fieldset>
 }
 
 function ClubLogo() {
   const [logo, setLogo] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, run] = useBusyAction()
   useEffect(() => { api('branding').then(d => setLogo(d.club_logo || '')).catch(() => setLogo('')) }, [])
   const pick = () => {
+    if (busy) return
     const input = document.createElement('input')
     input.type = 'file'; input.accept = 'image/*'
     input.onchange = async () => {
       const f = input.files?.[0]; if (!f) return
-      setBusy(true)
       try {
-        const url = await uploadToCloud(f)
-        await api('branding', { method: 'POST', body: { club_logo: url } })
-        setLogo(url); window.dispatchEvent(new Event('club-logo-changed'))
-      } catch (e) { alert(e.message) } finally { setBusy(false) }
+        await run(async () => {
+          const url = await uploadToCloud(f)
+          await api('branding', { method: 'POST', body: { club_logo: url } })
+          setLogo(url); window.dispatchEvent(new Event('club-logo-changed'))
+        }, 'Club logo updated.')
+      } catch {}
     }
     input.click()
   }
   const reset = async () => {
-    if (!confirm('Reset to the default club logo?')) return
-    try { await api('branding', { method: 'POST', body: { club_logo: '' } }); setLogo(''); window.dispatchEvent(new Event('club-logo-changed')) } catch (e) { alert(e.message) }
+    if (!confirm('Reset to the default club logo?') || busy) return
+    try {
+      await run(async () => { await api('branding', { method: 'POST', body: { club_logo: '' } }); setLogo(''); window.dispatchEvent(new Event('club-logo-changed')) }, 'Club logo reset to default.')
+    } catch {}
   }
   if (logo === null) return null
   return <fieldset className="mode"><legend>Club logo</legend>
     <div className="logo-admin">
       <img src={logo ? img(logo) : DEFAULT_LOGO} alt="Club logo" />
       <div className="actions-row">
-        <button type="button" className="btn" disabled={busy} onClick={pick}>{busy ? 'Uploading…' : 'Change logo'}</button>
-        {logo && <button type="button" className="icon-btn" onClick={reset}>Reset to default</button>}
+        <button type="button" className="btn" disabled={busy} onClick={pick}>{busy && <Spin />}{busy ? 'Uploading…' : 'Change logo'}</button>
+        {logo && <button type="button" className="icon-btn" disabled={busy} onClick={reset}>{busy && <Spin />}Reset to default</button>}
       </div>
     </div>
     <small>Shown in the header, news banners, club page and next to All Stars FC on the matches page.</small>
@@ -694,15 +694,22 @@ function ClubLogo() {
 }
 
 function Admin() {
-  const [auth, setAuth] = useState(null); const [err, setErr] = useState(''); const [tab, setTab] = useState('hero_images')
+  const [auth, setAuth] = useState(null); const [err, setErr] = useState(''); const [tab, setTab] = useState('hero_images'); const [busy, run] = useBusyAction()
   useEffect(() => { api('me').then(d => setAuth(d.admin)) }, [])
-  const login = async e => { e.preventDefault(); try { await api('login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); setAuth(true) } catch (x) { setErr(x.message) } }
+  const login = async e => {
+    e.preventDefault(); setErr('')
+    try { await run(() => api('login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }), 'Logged in successfully.'); setAuth(true) } catch (x) { setErr(x.message) }
+  }
+  const logout = async () => {
+    if (busy) return
+    try { await run(() => api('logout'), 'Logged out.'); setAuth(false) } catch {}
+  }
   if (auth === null) return null
   if (!auth) return <div className="wrap narrow"><h1>Admin login</h1><form className="form" onSubmit={login}>
     <label>Username<input name="username" required /></label><label>Password<input name="password" type="password" required /></label>
-    {err && <p className="err">{err}</p>}<button className="btn">Log in</button></form></div>
+    {err && <p className="err">{err}</p>}<button className="btn" disabled={busy}>{busy && <Spin />}{busy ? 'Logging in…' : 'Log in'}</button></form></div>
   return <div className="wrap"><h1>Admin</h1>
-    <div className="tabs">{Object.entries(SECTIONS).map(([k, [l]]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
-      <button onClick={async () => { await api('logout'); setAuth(false) }}>Log out</button></div>
+    <div className="tabs">{Object.entries(SECTIONS).map(([k, [l]]) => <button key={k} className={tab === k ? 'on' : ''} disabled={busy} onClick={() => setTab(k)}>{l}</button>)}
+      <button disabled={busy} onClick={logout}>{busy && <Spin />}Log out</button></div>
         {tab === 'hero_images' && <HeroMode />}{tab === 'matches' && <ClubLogo />}<Section key={tab} t={tab} /></div>
 }
